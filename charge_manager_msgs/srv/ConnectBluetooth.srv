@@ -1,0 +1,5 @@
+string mac
+---
+bool success
+float64 connection_time
+string result
