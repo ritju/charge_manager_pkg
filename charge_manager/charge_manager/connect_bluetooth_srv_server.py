@@ -1,46 +1,56 @@
 import bleak
 from bleak import BleakClient, BleakScanner
-from charge_manager_msgs.srv import ConnectBluetooth
+
 import rclpy
-from rclpy.node import Node
-import time
-from std_msgs.msg import Int8 # 0 => /charger/stop; 1 => /charger/start
-from charge_manager_msgs.msg import ChargerState2
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolicy
+from rclpy.node import Node
+
+from std_msgs.msg import Int8 # 0 => /charger/stop; 1 => /charger/start
+from charge_manager_msgs.msg import ChargerState2
+from charge_manager_msgs.srv import ConnectBluetooth
+
 import crcmod
+import time
+import asyncio
 
 start_charge_data = ''
 stop_charge_data = ''
+mac = '94:C9:60:43:BD:FD'
 
 class ConnectBluetoothService(Node):
     
     def __init__(self):
-        super.__init__('connect_bluetooth_srv_server')
+        super().__init__('connect_bluetooth_srv_server')
         self.get_logger().info('连接蓝牙服务启动......')
         self.bleak_client = None
         self.uuid_notify = None
         self.uuid_write = None
+        self.connect_completed = False
         # 初化化话题 /charger/state
-        self.charger_state = ChargerState2()
-        self.charger_state.pid = ''
-        self.charger_state.has_contact = False
-        self.charger_state.is_charging = False
+        self.charger_state2 = ChargerState2()
+        self.charger_state2.pid = ''
+        self.charger_state2.has_contact = False
+        self.charger_state2.is_charging = False
 
         cb_group_type = ReentrantCallbackGroup()
-        self.charger_state_pub = self.create_publisher(ChargerState2, '/charger/state2', callback_group= cb_group_type)
+        self.charger_state_pub = self.create_publisher(ChargerState2, '/charger/state2', 5, callback_group= cb_group_type)
         self.timer_charger_state_pub = self.create_timer(0.2, self.timer_charger_state_pub_callback)
-        self.srv = self.create_service(ConnectBluetooth, 'connect_bluetooth', self.service_callback, callback_group=cb_group_type)
-        self.command_sub_ = self.create_subscription(Int8, 'bluetooth_command', self.command_callback, self.timer_notify_callback)
-        self.timer_notify = self.create_timer(0.2, self.notify_callback)
+        self.srv = self.create_service(ConnectBluetooth, 'connect_bluetooth', self.service_callback_wrapper, callback_group=cb_group_type)
+        self.command_sub_ = self.create_subscription(Int8, 'bluetooth_command', self.command_callback, 1)
+        # self.timer_notify = self.create_timer(0.2, self.notify_callback_wrapper)
 
     def timer_charger_state_pub_callback(self):
-        if not self.bleak_client.is_connected:
-            self.charger_state.pid = ''
-        self.charger_state_pub.publish(self.charger_state)
+        if self.bleak_client is None:
+            self.charger_state2.pid = ''
+        self.charger_state_pub.publish(self.charger_state2)
 
+    def notify_callback_wrapper(self):
+        asyncio.run(self.timer_notify_callback())
+    
     async def timer_notify_callback(self):
-        await self.bleak_client.start_notify(self.uuid_notify, self.notify_data)
+        if self.bleak_client != None:
+            await self.bleak_client.start_notify(self.uuid_notify, self.notify_data)
     
     async def command_callback(self, msg):
         send_data = None
@@ -87,11 +97,20 @@ class ConnectBluetoothService(Node):
             self.get_logger().debug(f'recv crc: {data_list[-2].upper()}')
             self.get_logger().info('蓝牙数据未通过校验,舍弃数据！')
 
-
+    def service_callback_wrapper(self, request, response):
+        req = []
+        res = []
+        req.append(request)
+        res.append(response)
+        asyncio.run(self.service_callback(req, res))
+        while not self.connect_completed:
+            self.get_logger().info('connecting bluetooth ......', throttle_duration_sec=1)
+        return res[0]
+    
     async def service_callback(self, request, response):
         time_start = time.time()
         bluetooth_searched = False
-        mac = request.mac
+        mac = request[0].mac
         ble_device = None
         self.get_logger().info("搜索附近的蓝牙......")
         devices = await BleakScanner().discover(return_adv=True)
@@ -100,20 +119,21 @@ class ConnectBluetoothService(Node):
         if devices_num > 0:
             self.get_logger().info('--------Mac-------- | --------Name-------')
             for key in devices:
-                self.get_logger().info(f'{key}  | {devices[key][1].local_name}')
+                self.get_logger().info(f'{key}   | {devices[key][1].local_name}')
                 if key == mac:
                     bluetooth_searched = True
                     ble_device = key
                     break
         if bluetooth_searched:
-            self.get_logger().info(f'成功搜索到蓝牙 {mac}。')
+            self.get_logger().info(f'成功搜索到蓝牙 {mac} .')
             self.bleak_client = BleakClient(ble_device)
+            self.connect_completed = False
             try:
                 await self.bleak_client.connect()
                 time_end = time.time()
-                response.connection_time = time_end - time_start
-                response.success = True
-                response.reason = f'连接mac地址为： {self.mac} 的蓝牙成功。'
+                response[0].connection_time = time_end - time_start
+                response[0].success = True
+                response[0].result = f'连接mac地址为： {mac} 的蓝牙成功。'
                 services = self.bleak_client.services
                 for service in services:
                     for character in service.characteristics:
@@ -126,14 +146,17 @@ class ConnectBluetoothService(Node):
                             self.uuid_notify = character.uuid                                
                             self.get_logger().info(f'uuid_notify: {self.uuid_notify}')
             except Exception as e:
+                self.get_logger().info('get exception when connect bluetooth ...')
                 print(e)    
         else:
             self.get_logger().info(f'未搜索到蓝牙 {mac}。')
-            response.success = False
+            response[0].success = False
             time_end = time.time()
-            response.connection_time = time_end - time_start
-            response.reason = f"未搜索到mac地址为： {self.mac} 的蓝牙"
-        return response
+            response[0].connection_time = time_end - time_start
+            response[0].reason = f"未搜索到mac地址为： {mac} 的蓝牙"
+        self.get_logger().info('before return response')
+        self.connect_completed = True
+        # return response[0]
     
     # CRC-8/MAXIM　x8+x5+x4+1  循环冗余校验 最后在取了反的
     # 计算校验码

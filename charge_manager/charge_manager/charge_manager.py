@@ -11,7 +11,7 @@ from charge_manager_msgs.action import Charge
 class chargeManager(Node):
     
     def __init__(self):
-        super.__init__('charge_manager_node')
+        super().__init__('charge_manager_node')
         self.get_logger().info('charge_manager_node started ......')
 
         callback_group_type = ReentrantCallbackGroup()

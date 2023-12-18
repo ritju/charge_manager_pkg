@@ -18,7 +18,7 @@ from capella_ros_dock_msgs.action import Dock
 class ChargeAction(Node):
     
     def __init__(self):
-        super.__init__('charge_action_server')      
+        super().__init__('charge_action_server')      
 
         # 定义 callback_group 类型
         self.cb_group = ReentrantCallbackGroup()
