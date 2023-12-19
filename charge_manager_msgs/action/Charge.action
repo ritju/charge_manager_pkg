@@ -1,4 +1,5 @@
 string mac
 ---
----
 bool success
+---
+string state

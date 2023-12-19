@@ -14,7 +14,7 @@ find_package(capella_ros_service_interfaces REQUIRED)
 # find_package(<dependency> REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/ChargerState2.msg"
+  "msg/ChargeState2.msg"
   "srv/ConnectBluetooth.srv"
   "action/Charge.action"
   DEPENDENCIES capella_ros_service_interfaces

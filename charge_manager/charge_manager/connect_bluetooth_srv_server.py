@@ -7,7 +7,7 @@ from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolic
 from rclpy.node import Node
 
 from std_msgs.msg import Int8 # 0 => /charger/stop; 1 => /charger/start
-from charge_manager_msgs.msg import ChargerState2
+from charge_manager_msgs.msg import ChargeState2
 from charge_manager_msgs.srv import ConnectBluetooth
 
 import crcmod
@@ -28,20 +28,33 @@ class ConnectBluetoothService(Node):
         self.uuid_write = None
         self.connect_completed = False
         # 初化化话题 /charger/state
-        self.charger_state2 = ChargerState2()
+        self.charger_state2 = ChargeState2()
         self.charger_state2.pid = ''
         self.charger_state2.has_contact = False
         self.charger_state2.is_charging = False
 
         cb_group_type = ReentrantCallbackGroup()
-        self.charger_state_pub = self.create_publisher(ChargerState2, '/charger/state2', 5, callback_group= cb_group_type)
+        self.charger_state_pub = self.create_publisher(ChargeState2, '/charger/state2', 5, callback_group= cb_group_type)
         self.timer_charger_state_pub = self.create_timer(0.2, self.timer_charger_state_pub_callback)
         self.srv = self.create_service(ConnectBluetooth, 'connect_bluetooth', self.service_callback_wrapper, callback_group=cb_group_type)
         self.command_sub_ = self.create_subscription(Int8, 'bluetooth_command', self.command_callback, 1)
         # self.timer_notify = self.create_timer(0.2, self.notify_callback_wrapper)
 
     def timer_charger_state_pub_callback(self):
-        if self.bleak_client is None:
+        # try:
+        #     mtu_size = self.bleak_client.mtu_size
+        #     self.get_logger().info(f'mtu_size: {mtu_size}')
+        # except Exception as e:
+        #     self.charger_state2.pid = ''
+        #     self.charger_state2.has_contact = False
+        #     self.charger_state2.is_charging = False
+        if isinstance(self.bleak_client, BleakClient):            
+            self.get_logger().info(f'self.bleak_client.is_connected: {self.bleak_client.is_connected}', throttle_duration_sec = 3)
+            if self.bleak_client.is_connected:
+                self.charger_state2.pid = self.bleak_client.address
+            else:
+                self.charger_state2.pid = ''
+        else:
             self.charger_state2.pid = ''
         self.charger_state_pub.publish(self.charger_state2)
 
@@ -112,6 +125,7 @@ class ConnectBluetoothService(Node):
         bluetooth_searched = False
         mac = request[0].mac
         ble_device = None
+        self.get_logger().info(f'try to connect bluetooth: {mac}')
         self.get_logger().info("搜索附近的蓝牙......")
         devices = await BleakScanner().discover(return_adv=True)
         devices_num = len(devices)
@@ -123,10 +137,9 @@ class ConnectBluetoothService(Node):
                 if key == mac:
                     bluetooth_searched = True
                     ble_device = key
-                    break
         if bluetooth_searched:
             self.get_logger().info(f'成功搜索到蓝牙 {mac} .')
-            self.bleak_client = BleakClient(ble_device)
+            self.bleak_client = BleakClient(ble_device, disconnected_callback=self.disconnect_bluetooth_callback)
             self.connect_completed = False
             try:
                 await self.bleak_client.connect()
@@ -134,6 +147,7 @@ class ConnectBluetoothService(Node):
                 response[0].connection_time = time_end - time_start
                 response[0].success = True
                 response[0].result = f'连接mac地址为： {mac} 的蓝牙成功。'
+                self.charger_state2.pid = mac
                 services = self.bleak_client.services
                 for service in services:
                     for character in service.characteristics:
@@ -149,14 +163,16 @@ class ConnectBluetoothService(Node):
                 self.get_logger().info('get exception when connect bluetooth ...')
                 print(e)    
         else:
-            self.get_logger().info(f'未搜索到蓝牙 {mac}。')
+            log_str = f'未搜索到蓝牙 {mac}'
+            self.get_logger().info(f'{log_str}')
             response[0].success = False
             time_end = time.time()
             response[0].connection_time = time_end - time_start
-            response[0].reason = f"未搜索到mac地址为： {mac} 的蓝牙"
-        self.get_logger().info('before return response')
+            response[0].result = f"{log_str}"
         self.connect_completed = True
-        # return response[0]
+    
+    def disconnect_bluetooth_callback(client):
+        print('disconnected called .............')
     
     # CRC-8/MAXIM　x8+x5+x4+1  循环冗余校验 最后在取了反的
     # 计算校验码
