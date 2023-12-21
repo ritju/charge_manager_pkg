@@ -100,6 +100,7 @@ class chargeManager(Node):
         return response
     
     def charger_stop_docking_service_callback(self, request, response):
+        self.charger_state.is_docking = False
         self.get_logger().info('received a request for /charger/stop_docking service')
         self.get_logger().info("stop charge action")
         if self.charge_action_client_sendgoal_future != None and isinstance(self.charge_action_client_sendgoal_future, Future):
