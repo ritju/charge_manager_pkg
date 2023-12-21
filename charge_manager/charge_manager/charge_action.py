@@ -189,7 +189,8 @@ class ChargeAction(Node):
         self.get_logger().info("Received request to cancel charge action servo goal")
         self.stop_loop = True
         if self.dock_executing:
-            self.dock_goal_handle.cancel_goal_async()
+            goal_handle = self.dock_client_sendgoal_future.result()
+            goal_handle.cancel_goal_async()
             self.get_logger().info('cancel dock action')
             self.dock_executing = True
         return CancelResponse.ACCEPT

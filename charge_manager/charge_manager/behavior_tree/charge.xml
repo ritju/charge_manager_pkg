@@ -1,0 +1,24 @@
+<root main_tree_to_execute="MainTree">
+    <BehaviorTree ID="MainTree">
+        <Sequence name="charge">
+            <RecoveryNode number_of_retries="10000" name="charge_with_bluetooth_recovery">
+                <PipelineSequence>
+                    <RateController hz = "10.0">
+                        <Inverter>
+                            <IsBluetoothConnected />
+                        </Inverter>
+                     </RateController>
+                     <ConnectBluetooth timeout = "10"></ConnectBluetooth>
+                </PipelineSequence>
+                <PipelineSequence>
+                        <DockAction timeout = "180" />
+                </PipelineSequence>
+            </RecoveryNode>
+            <Fallback>
+                <IsCharging/>
+                <StartCharging/>
+            </Fallback>
+        </Sequence>
+    </BehaviorTree>
+</root>
+      

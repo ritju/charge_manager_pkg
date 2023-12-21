@@ -1,4 +1,5 @@
 string mac
+string behavior_tree
 ---
 bool success
 ---
