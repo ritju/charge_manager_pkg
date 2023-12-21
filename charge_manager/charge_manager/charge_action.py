@@ -63,8 +63,6 @@ class ChargeAction(Node):
     def init_params(self):
         # 初始化蓝牙相关参数
         self.mac = ''
-        self.ble_device = None
-        self.bleak_client = None
         self.bluetooth_connected = False
         self.future_connect_bluetooth = None
 
@@ -104,9 +102,6 @@ class ChargeAction(Node):
                     self.charger_start_client_.call_async(request)
                 elif self.charger_state.has_contact and self.charger_state.is_charging:
                     self.feedback_msg.state = ChargeState.is_charging
-                    result = Charge.Result()
-                    result.success = True
-                    self.goal_handle.succeed(result)
                 else:
                     pass
         else:            
@@ -148,6 +143,7 @@ class ChargeAction(Node):
     # charge_action handle_accepted_callback
     def charge_action_handle_accepted_callback(self, goal_handle):
         self.get_logger().info('charge_action_handle_accepted_callback')
+        self.goal_handle = goal_handle
         goal_handle.execute()
     
     # charge_action 服务端 execute_callback
@@ -155,7 +151,6 @@ class ChargeAction(Node):
         self.get_logger().info("charge_action_execute_callback.")
         self.init_params()
         self.mac = goal_handle.request.mac
-        self.goal_handle = goal_handle
 
         self.feedback_msg = Charge.Feedback()
         self.feedback_msg.state = ChargeActionState.idle
@@ -164,14 +159,17 @@ class ChargeAction(Node):
         self.loop_thread.start()
 
         while True:
-            if self.charger_state.is_charging:
+            if self.battery_ > 0.999:
                 result = Charge.Result()
                 result.success = True
                 self.goal_handle.succeed()
                 return result
             else:
-                pass
-
+                if self.dock_completed and not self.charger_state.has_contact:
+                    result = Charge.Result()
+                    result.success = False
+                    self.goal_handle.succeed()
+                    return result
             time.sleep(2)
     
     def loop_(self):
@@ -179,9 +177,9 @@ class ChargeAction(Node):
         # self.timer_loop = self.create_timer(0.2, self.timer_loop_callback, self.cb_group)
         while True:
             self.timer_loop_callback()
-            time.sleep(1)
-            if self.charger_state.is_charging or self.stop_loop:
+            if self.battery_ > 0.999 or self.stop_loop:
                 break
+            time.sleep(0.2)
 
     
     # charge_action cancel callback
@@ -217,6 +215,9 @@ class ChargeAction(Node):
     def dock_get_result_callback(self, future):
         result = future.result().result
         self.get_logger().info('Dock result => is_docked: {}'.format(result.is_docked))
+        if not result.is_docked:
+            self.get_logger().info('Dock action failed, Charge Action aborted')
+            self.stop_loop = True
         self.dock_executing = False
         self.dock_completed = True
 

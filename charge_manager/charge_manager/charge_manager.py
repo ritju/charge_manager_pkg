@@ -112,7 +112,7 @@ class chargeManager(Node):
         return response
 
     def charge_action_feedback_callback(self, feedback_msg):
-        pass
+        self.get_logger().info(f"=== charge action ===     feedback: {feedback_msg.feedback.state}", throttle_duration_sec=3)
 
     def charge_action_response_callback(self, future):
         goal_handle = future.result()
@@ -125,6 +125,7 @@ class chargeManager(Node):
 
     def charge_get_result_callback(self, future):
         result = future.result().result
+        self.charger_state.is_docking = False
         self.get_logger().info('=== Charge action ===     result => success: {}'.format(result.success)) 
     
 def main(args=None):
