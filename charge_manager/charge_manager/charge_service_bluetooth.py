@@ -317,18 +317,18 @@ class BluetoothChargeServer(Node):
             if data_list[8:10] == ['00', '21']:
                 if data_list[12:-2][0] == '00':
                     self.charge_state.is_charging = False
-                    # self.get_logger().info(f'is_charging: {self.charge_state.is_charging}')
+                    self.get_logger().info(f'is_charging: {self.charge_state.is_charging}', throttle_duration_sec=5)
                 elif data_list[12:-2][0] == '01':
                     self.charge_state.is_charging = True
-                    # self.get_logger().info(f'is_charging: {self.charge_state.is_charging}')
+                    self.get_logger().info(f'is_charging: {self.charge_state.is_charging}', throttle_duration_sec=5)
                 else:
                     self.get_logger().info('is_charging 数据段数据错误。')
                 if data_list[12:-2][5] == '00':
                     self.charge_state.has_contact = False
-                    # self.get_logger().info(f'has_contact: {self.charge_state.has_contact}')
+                    self.get_logger().info(f'has_contact: {self.charge_state.has_contact}', throttle_duration_sec=5)
                 elif data_list[12:-2][5] == '01':
                     self.charge_state.has_contact = True
-                    # self.get_logger().info(f'has_contact: {self.charge_state.has_contact}')
+                    self.get_logger().info(f'has_contact: {self.charge_state.has_contact}', throttle_duration_sec=5)
                     # now_time = self.get_clock().now()
                     # self.charge_state.stamp = now_time.to_msg()
                 else:
