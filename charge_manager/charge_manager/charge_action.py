@@ -80,7 +80,7 @@ class ChargeAction(Node):
         self.stop_loop = False
 
     def battery_sub_callback(self, msg):
-        self.battery_ = msg.battery
+        self.battery_ = msg.res_cap
     
     def charger_state_sub_callback(self, msg):
         self.bluetooth_connected = True if msg.pid == self.mac and msg.pid != '' else False
