@@ -101,7 +101,7 @@ class ChargeAction(Node):
                     request = Empty.Request()
                     self.charger_start_client_.call_async(request)
                 elif self.charger_state.has_contact and self.charger_state.is_charging:
-                    self.feedback_msg.state = ChargeState.is_charging
+                    self.feedback_msg.state = ChargeActionState.charging
                 else:
                     pass
         else:            
