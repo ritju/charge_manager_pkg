@@ -202,8 +202,8 @@ class ChargeAction(Node):
     def dock_feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
         self.get_logger().info('dock feedback => sees_dock : {}'.format(feedback.sees_dock))
-        self.get_logger().info('dock feedback => state     : {}'.format(feedback.sees_dock))
-        self.get_logger().info('dock feedback => infos     : {}'.format(feedback.sees_dock))
+        self.get_logger().info('dock feedback => state     : {}'.format(feedback.state))
+        self.get_logger().info('dock feedback => infos     : {}'.format(feedback.infos))
 
     def dock_response_callback(self, future):
         goal_handle = future.result()
