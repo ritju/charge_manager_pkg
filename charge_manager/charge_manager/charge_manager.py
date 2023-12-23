@@ -11,6 +11,7 @@ from std_msgs.msg import String
 from charge_manager_msgs.action import Charge
 from charge_manager_msgs.msg import ChargeState2
 from capella_ros_service_interfaces.msg import ChargeState
+from geometry_msgs.msg import Twist
 
 class chargeManager(Node):
     
@@ -45,6 +46,9 @@ class chargeManager(Node):
         self.charger_state_publisher = self.create_publisher(ChargeState, '/charger/state', 5, callback_group=callback_group_type)
         self.timer_pub_charger_state = self.create_timer(0.2, self.timer_pub_charger_state_callback, callback_group=callback_group_type)
         
+        # 初始化 zero_cmd_vel_publisher
+        self.zero_cmd_vel_publisher = self.create_publisher = self.create_publisher(Twist, '/cmd_vel', 1, callback_group=callback_group_type)
+        
         # /charger/start service
         self.charger_start_service = self.create_service(Empty, '/charger/start', self.charger_start_service_callback, callback_group=callback_group_type)
         
@@ -61,6 +65,11 @@ class chargeManager(Node):
       
     def timer_pub_charger_state_callback(self):
          self.charger_state_publisher.publish(self.charger_state)
+         if self.charger_state.is_charging and self.charger_state.has_contact:
+             zero_cmd = Twist()
+             zero_cmd.linear.x = 0.0
+             zero_cmd.angular.z = 0.0
+             self.zero_cmd_vel_publisher.publish(zero_cmd)
 
     def charger_state2_sub_callback(self, msg):
         self.charger_state.pid = msg.pid
