@@ -87,34 +87,31 @@ class ChargeAction(Node):
         self.charger_state = msg
 
     def timer_loop_callback(self):
-        if self.bluetooth_connected:
-            if not self.dock_executing and not self.dock_completed:
-                self.dock_executing = True
-                self.get_logger().info('-------- call /dock action --------')
-                dock_msg = Dock.Goal()
-                while not self.dock_client_.wait_for_server(2):
-                    self.get_logger().info('Dock action server not available.', throttle_duration_sec = 2)
-                self.dock_client_sendgoal_future = self.dock_client_.send_goal_async(dock_msg, self.dock_feedback_callback)
-                self.dock_client_sendgoal_future.add_done_callback(self.dock_response_callback)
-            else:
-                if self.charger_state.has_contact and not self.charger_state.is_charging:
-                    request = Empty.Request()
-                    self.charger_start_client_.call_async(request)
-                elif self.charger_state.has_contact and self.charger_state.is_charging:
-                    self.feedback_msg.state = ChargeActionState.charging
-                else:
-                    pass
-        else:            
-            if not self.connect_bluetooth_executing:
-                self.connect_bluetooth_executing = True
-                self.get_logger().info("-------- call /connect_bluetooth service --------")
-                request = ConnectBluetooth.Request()
-                request.mac = self.mac
-                self.get_logger().info(f'request.mac {request.mac}')
-                # 创建连接蓝牙的客户端
-                self.connect_bluetooth_client_ = self.create_client(ConnectBluetooth, 'connect_bluetooth',callback_group=self.cb_group)
-                self.future_connect_bluetooth = self.connect_bluetooth_client_.call_async(request)
-                self.future_connect_bluetooth.add_done_callback(self.connect_bluetooth_done_callback)
+        if not self.bluetooth_connected and  not self.connect_bluetooth_executing :
+            self.connect_bluetooth_executing = True
+            self.get_logger().info("-------- call /connect_bluetooth service --------")
+            request = ConnectBluetooth.Request()
+            request.mac = self.mac
+            self.get_logger().info(f'request.mac {request.mac}')
+            # 创建连接蓝牙的客户端
+            self.connect_bluetooth_client_ = self.create_client(ConnectBluetooth, 'connect_bluetooth',callback_group=self.cb_group)
+            self.future_connect_bluetooth = self.connect_bluetooth_client_.call_async(request)
+            self.future_connect_bluetooth.add_done_callback(self.connect_bluetooth_done_callback)
+
+        if not self.dock_executing and not self.dock_completed:
+            self.dock_executing = True
+            self.get_logger().info('-------- call /dock action --------')
+            dock_msg = Dock.Goal()
+            while not self.dock_client_.wait_for_server(2):
+                self.get_logger().info('Dock action server not available.', throttle_duration_sec = 2)
+            self.dock_client_sendgoal_future = self.dock_client_.send_goal_async(dock_msg, self.dock_feedback_callback)
+            self.dock_client_sendgoal_future.add_done_callback(self.dock_response_callback)
+        else:
+            if self.charger_state.has_contact and not self.charger_state.is_charging:
+                request = Empty.Request()
+                self.charger_start_client_.call_async(request)
+            elif self.charger_state.has_contact and self.charger_state.is_charging:
+                self.feedback_msg.state = ChargeActionState.charging
             else:
                 pass
 
