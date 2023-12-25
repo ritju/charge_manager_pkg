@@ -101,7 +101,7 @@ class chargeManager(Node):
         self.charger_state.is_docking = True
         charge_msg = Charge.Goal()
         charge_msg.mac = self.mac
-        charge_msg.mac = '94:C9:60:43:BD:FD'
+        # charge_msg.mac = '94:C9:60:43:BD:FD'
         while not self.charge_action_client.wait_for_server(2):
             self.get_logger().info('Charge action server not available.')
         self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
