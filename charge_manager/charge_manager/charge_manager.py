@@ -47,7 +47,7 @@ class chargeManager(Node):
         self.timer_pub_charger_state = self.create_timer(0.2, self.timer_pub_charger_state_callback, callback_group=callback_group_type)
         
         # 初始化 zero_cmd_vel_publisher
-        self.zero_cmd_vel_publisher = self.create_publisher = self.create_publisher(Twist, '/cmd_vel', 1, callback_group=callback_group_type)
+        self.zero_cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 1, callback_group=callback_group_type)
         
         # /charger/start service
         self.charger_start_service = self.create_service(Empty, '/charger/start', self.charger_start_service_callback, callback_group=callback_group_type)
