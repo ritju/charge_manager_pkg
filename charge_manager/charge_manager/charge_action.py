@@ -80,7 +80,7 @@ class ChargeAction(Node):
         self.stop_loop = False
 
     def battery_sub_callback(self, msg):
-        self.battery_ = msg.battery
+        self.battery_ = msg.res_cap
     
     def charger_state_sub_callback(self, msg):
         self.bluetooth_connected = True if msg.pid == self.mac and msg.pid != '' else False
@@ -101,7 +101,7 @@ class ChargeAction(Node):
                     request = Empty.Request()
                     self.charger_start_client_.call_async(request)
                 elif self.charger_state.has_contact and self.charger_state.is_charging:
-                    self.feedback_msg.state = ChargeState.is_charging
+                    self.feedback_msg.state = ChargeActionState.charging
                 else:
                     pass
         else:            
@@ -201,7 +201,11 @@ class ChargeAction(Node):
     
     def dock_feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
+        self.get_logger().info('***************** Dock Feedback *****************')
         self.get_logger().info('dock feedback => sees_dock : {}'.format(feedback.sees_dock))
+        self.get_logger().info('dock feedback => state     : {}'.format(feedback.state))
+        self.get_logger().info('dock feedback => infos     : {}'.format(feedback.infos))
+        self.get_logger().info('*************************************************')
 
     def dock_response_callback(self, future):
         goal_handle = future.result()
