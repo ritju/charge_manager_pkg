@@ -64,6 +64,8 @@ class BluetoothChargeServer(Node):
         self.send_data = None
         # 初始化心跳数据
         self.send_heartbeat_data = None
+        # 初始化本地接收蓝牙的心跳时间(上一次收到蓝牙数据帧的时间)
+        self.heartbeat_time = time.time()
         # 是否断开蓝牙的属性
         self.disconnect_bluetooth = False
         # 通过bssid链接充电桩WIFI服务
@@ -109,6 +111,8 @@ class BluetoothChargeServer(Node):
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
             self.charge_state_publisher.publish(self.charge_state)
+            if time.time() - self.heartbeat_time > 10:
+                self.self.charge_state.pid = ''
             self.publish_rate.sleep()
 
     def start_stop_charge_callback(self,msgs):
@@ -309,6 +313,7 @@ class BluetoothChargeServer(Node):
         # 校验数据
         crc8_ = self.crc8(data_list[:-2])
         if crc8_ == data_list[-2].upper():
+            self.heartbeat_time = time.time()
             # self.get_logger().debug('数据校验通过！')
             # self.get_logger().info('解析后的数据为：{}'.format(data_list))
             self.udp_data = data_list
