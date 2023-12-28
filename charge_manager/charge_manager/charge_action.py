@@ -50,6 +50,7 @@ class ChargeAction(Node):
 
         # /charger/start client
         self.charger_start_client_ = self.create_client(Empty, '/charger/start', callback_group=self.cb_group)
+        self.charger_start_client_last_request_time = time.time()
         
         # 创建 charge action 服务端
         self.charge_action_server_ = ActionServer(self, Charge, 'charge', 
@@ -101,7 +102,9 @@ class ChargeAction(Node):
             else:
                 if self.charger_state.has_contact and not self.charger_state.is_charging:
                     request = Empty.Request()
-                    self.charger_start_client_.call_async(request)
+                    if time.time() - self.charger_start_client_last_request_time > 2.0:
+                        self.charger_start_client_.call_async(request)
+                        self.charger_start_client_last_request_time = time.time()
                 elif self.charger_state.has_contact and self.charger_state.is_charging:
                     self.feedback_msg.state = ChargeState.is_charging
                     result = Charge.Result()
