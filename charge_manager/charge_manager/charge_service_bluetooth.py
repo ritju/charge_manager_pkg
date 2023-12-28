@@ -113,6 +113,7 @@ class BluetoothChargeServer(Node):
             self.charge_state_publisher.publish(self.charge_state)
             if time.time() - self.heartbeat_time > 10:
                 self.self.charge_state.pid = ''
+                self.disconnect_bluetooth = True
             self.publish_rate.sleep()
 
     def start_stop_charge_callback(self,msgs):
@@ -273,10 +274,10 @@ class BluetoothChargeServer(Node):
                         if self.send_heartbeat_data is not None:
                             await self.bleak_client.write_gatt_char(self.uuid_write,self.send_heartbeat_data)
                             self.send_heartbeat_data = None
-                        # if self.disconnect_bluetooth:
-                        #     self.get_logger().info(f"断开蓝牙。")
-                        #     await self.bleak_client.disconnect()
-                        #     break
+                        if self.disconnect_bluetooth:
+                            self.get_logger().info(f"断开蓝牙。")
+                            await self.bleak_client.disconnect()
+                            break
                     self.charge_state.pid = ""
         except Exception as e:
             self.bluetooth_connected = False
