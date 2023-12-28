@@ -1,0 +1,29 @@
+<root main_tree_to_execute="MainTree">
+    <BehaviorTree ID="MainTree">
+        <PipelineSequence>
+            <PipelineSequence>
+                <RecoveryNode number_of_retries = "10">
+                    <IsBluetoothConnected/>
+                    <ConnectBluetooth/>
+                </RecoveryNode>        
+                <RecoveryNode>
+                    <HasContated/>
+                    <IsDockNotCompleted>
+                        <IsDockNotExecuting>
+                            <DockAction/>
+                        </IsDockNotExecuting>
+                    </IsDockNotCompleted>                    
+                </RecoveryNode>
+            </PipelineSequence>
+            <Sequence>
+                <IsBatteryFullCondition></IsBatteryFullCondition>
+                <StartCharging/>
+            </Sequence>
+        </PipelineSequence>
+    </BehaviorTree>
+</root>
+
+
+
+
+      

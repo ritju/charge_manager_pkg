@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/workspaces/capella_ros_docker/install/include/**",
+        "/opt/ros/humble/include/**",
+        "/workspaces/capella_ros_docker/src/aruco_marker_location/aruco_ros/aruco/include/**",
+        "/workspaces/capella_ros_docker/src/aruco_marker_location/aruco_ros/aruco_ros/include/**",
+        "/workspaces/capella_ros_docker/src/aruco_marker_location/ros2_astra_camera/astra_camera/include/**",
+        "/workspaces/capella_ros_docker/src/capella_lidar_pack_wxb/wr_klm_high_80/include/**",
+        "/workspaces/capella_ros_docker/src/capella_lidar_pack_wxb/wr_ls_udp/include/**",
+        "/workspaces/capella_ros_docker/src/capella_lidar_pack_wxb/wr_ls_udp_20_H025/include/**",
+        "/workspaces/capella_ros_docker/src/capella_localization_pack/capella_relocalization_spin_action_server/include/**",
+        "/workspaces/capella_ros_docker/src/capella_localization_pack/capella_robot_localization_check/include/**",
+        "/workspaces/capella_ros_docker/src/capella_robot_drop_proof/include/**",
+        "/workspaces/capella_ros_docker/src/capella_ros_launcher/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/capella_ros_auto_charge_ctrl/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/capella_ros_calib/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/capella_ros_imu_calib/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/capella_ros_imu_ekf/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/capella_ros_imu_filter/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/capella_ros_lidar_correction/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/capella_ros_scan_odom/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/capella_ros_serial/include/**",
+        "/workspaces/capella_ros_docker/src/capella_serial_pack_hcj/csm/include/**",
+        "/workspaces/capella_ros_docker/src/charge_manager_pkg/charge_behavior_tree/include/**",
+        "/workspaces/capella_ros_docker/src/libuvc/include/**",
+        "/workspaces/capella_ros_docker/src/magic_enum-0.8.0/include/**",
+        "/workspaces/capella_ros_docker/src/pointcloud_to_laserscan/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

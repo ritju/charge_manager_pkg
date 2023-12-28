@@ -64,8 +64,6 @@ class ChargeAction(Node):
     def init_params(self):
         # 初始化蓝牙相关参数
         self.mac = ''
-        self.ble_device = None
-        self.bleak_client = None
         self.bluetooth_connected = False
         self.future_connect_bluetooth = None
 
@@ -83,46 +81,40 @@ class ChargeAction(Node):
         self.stop_loop = False
 
     def battery_sub_callback(self, msg):
-        self.battery_ = msg.battery
+        self.battery_ = msg.res_cap
     
     def charger_state_sub_callback(self, msg):
         self.bluetooth_connected = True if msg.pid == self.mac and msg.pid != '' else False
         self.charger_state = msg
 
     def timer_loop_callback(self):
-        if self.bluetooth_connected:
-            if not self.dock_executing and not self.dock_completed:
-                self.dock_executing = True
-                self.get_logger().info('-------- call /dock action --------')
-                dock_msg = Dock.Goal()
-                while not self.dock_client_.wait_for_server(2):
-                    self.get_logger().info('Dock action server not available.', throttle_duration_sec = 2)
-                self.dock_client_sendgoal_future = self.dock_client_.send_goal_async(dock_msg, self.dock_feedback_callback)
-                self.dock_client_sendgoal_future.add_done_callback(self.dock_response_callback)
-            else:
-                if self.charger_state.has_contact and not self.charger_state.is_charging:
-                    request = Empty.Request()
-                    if time.time() - self.charger_start_client_last_request_time > 2.0:
-                        self.charger_start_client_.call_async(request)
-                        self.charger_start_client_last_request_time = time.time()
-                elif self.charger_state.has_contact and self.charger_state.is_charging:
-                    self.feedback_msg.state = ChargeState.is_charging
-                    result = Charge.Result()
-                    result.success = True
-                    self.goal_handle.succeed(result)
-                else:
-                    pass
-        else:            
-            if not self.connect_bluetooth_executing:
-                self.connect_bluetooth_executing = True
-                self.get_logger().info("-------- call /connect_bluetooth service --------")
-                request = ConnectBluetooth.Request()
-                request.mac = self.mac
-                self.get_logger().info(f'request.mac {request.mac}')
-                # 创建连接蓝牙的客户端
-                self.connect_bluetooth_client_ = self.create_client(ConnectBluetooth, 'connect_bluetooth',callback_group=self.cb_group)
-                self.future_connect_bluetooth = self.connect_bluetooth_client_.call_async(request)
-                self.future_connect_bluetooth.add_done_callback(self.connect_bluetooth_done_callback)
+        if not self.bluetooth_connected and  not self.connect_bluetooth_executing :
+            self.connect_bluetooth_executing = True
+            self.get_logger().info("-------- call /connect_bluetooth service --------")
+            request = ConnectBluetooth.Request()
+            request.mac = self.mac
+            self.get_logger().info(f'request.mac {request.mac}')
+            # 创建连接蓝牙的客户端
+            self.connect_bluetooth_client_ = self.create_client(ConnectBluetooth, 'connect_bluetooth',callback_group=self.cb_group)
+            self.future_connect_bluetooth = self.connect_bluetooth_client_.call_async(request)
+            self.future_connect_bluetooth.add_done_callback(self.connect_bluetooth_done_callback)
+
+        if not self.dock_executing and not self.dock_completed:
+            self.dock_executing = True
+            self.get_logger().info('-------- call /dock action --------')
+            dock_msg = Dock.Goal()
+            while not self.dock_client_.wait_for_server(2):
+                self.get_logger().info('Dock action server not available.', throttle_duration_sec = 2)
+            self.dock_client_sendgoal_future = self.dock_client_.send_goal_async(dock_msg, self.dock_feedback_callback)
+            self.dock_client_sendgoal_future.add_done_callback(self.dock_response_callback)
+        else:
+            if self.charger_state.has_contact and not self.charger_state.is_charging:
+                request = Empty.Request()
+                if time.time() - self.charger_start_client_last_request_time > 2.0:
+                    self.charger_start_client_.call_async(request)
+                    self.charger_start_client_last_request_time = time.time()
+            elif self.charger_state.has_contact and self.charger_state.is_charging:
+                self.feedback_msg.state = ChargeActionState.charging
             else:
                 pass
 
@@ -151,6 +143,7 @@ class ChargeAction(Node):
     # charge_action handle_accepted_callback
     def charge_action_handle_accepted_callback(self, goal_handle):
         self.get_logger().info('charge_action_handle_accepted_callback')
+        self.goal_handle = goal_handle
         goal_handle.execute()
     
     # charge_action 服务端 execute_callback
@@ -158,7 +151,6 @@ class ChargeAction(Node):
         self.get_logger().info("charge_action_execute_callback.")
         self.init_params()
         self.mac = goal_handle.request.mac
-        self.goal_handle = goal_handle
 
         self.feedback_msg = Charge.Feedback()
         self.feedback_msg.state = ChargeActionState.idle
@@ -167,14 +159,17 @@ class ChargeAction(Node):
         self.loop_thread.start()
 
         while True:
-            if self.charger_state.is_charging:
+            if self.battery_ > 0.999:
                 result = Charge.Result()
                 result.success = True
                 self.goal_handle.succeed()
                 return result
             else:
-                pass
-
+                if self.dock_completed and not self.charger_state.has_contact:
+                    result = Charge.Result()
+                    result.success = False
+                    self.goal_handle.succeed()
+                    return result
             time.sleep(2)
     
     def loop_(self):
@@ -182,9 +177,9 @@ class ChargeAction(Node):
         # self.timer_loop = self.create_timer(0.2, self.timer_loop_callback, self.cb_group)
         while True:
             self.timer_loop_callback()
-            time.sleep(1)
-            if self.charger_state.is_charging or self.stop_loop:
+            if self.battery_ > 0.999 or self.stop_loop:
                 break
+            time.sleep(0.2)
 
     
     # charge_action cancel callback
@@ -192,7 +187,8 @@ class ChargeAction(Node):
         self.get_logger().info("Received request to cancel charge action servo goal")
         self.stop_loop = True
         if self.dock_executing:
-            self.dock_goal_handle.cancel_goal_async()
+            goal_handle = self.dock_client_sendgoal_future.result()
+            goal_handle.cancel_goal_async()
             self.get_logger().info('cancel dock action')
             self.dock_executing = True
         return CancelResponse.ACCEPT
@@ -205,7 +201,11 @@ class ChargeAction(Node):
     
     def dock_feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
+        self.get_logger().info('***************** Dock Feedback *****************')
         self.get_logger().info('dock feedback => sees_dock : {}'.format(feedback.sees_dock))
+        self.get_logger().info('dock feedback => state     : {}'.format(feedback.state))
+        self.get_logger().info('dock feedback => infos     : {}'.format(feedback.infos))
+        self.get_logger().info('*************************************************')
 
     def dock_response_callback(self, future):
         goal_handle = future.result()
@@ -219,6 +219,9 @@ class ChargeAction(Node):
     def dock_get_result_callback(self, future):
         result = future.result().result
         self.get_logger().info('Dock result => is_docked: {}'.format(result.is_docked))
+        if not result.is_docked:
+            self.get_logger().info('Dock action failed, Charge Action aborted')
+            self.stop_loop = True
         self.dock_executing = False
         self.dock_completed = True
 
