@@ -237,6 +237,7 @@ class BluetoothChargeServer(Node):
 
     # 创建bleak客户端
     async def create_bleakclient(self,address):
+        self.heartbeat_time = time.time()
         try:
             # 开始连接蓝牙
             self.get_logger().info(f"开始创建bleakclient:{address}")
