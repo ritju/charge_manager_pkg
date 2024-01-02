@@ -112,7 +112,7 @@ class BluetoothChargeServer(Node):
                 self.charge_state.is_charging = False
             self.charge_state_publisher.publish(self.charge_state)
             if time.time() - self.heartbeat_time > 10:
-                self.self.charge_state.pid = ''
+                self.charge_state.pid = ''
                 self.disconnect_bluetooth = True
             self.publish_rate.sleep()
 
