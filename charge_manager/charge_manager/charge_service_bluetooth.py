@@ -112,6 +112,9 @@ class BluetoothChargeServer(Node):
                 self.charge_state.is_charging = False
             self.charge_state_publisher.publish(self.charge_state)
             if time.time() - self.heartbeat_time > 10:
+                # self.get_logger().info("No data received more than 10 seconds.")
+                # self.get_logger().info(f"current_time: {time.time()}")
+                # self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
                 self.charge_state.pid = ''
                 self.disconnect_bluetooth = True
             self.publish_rate.sleep()
@@ -152,7 +155,7 @@ class BluetoothChargeServer(Node):
                     if self.charge_state.is_charging == True:
                         self.get_logger().info('成功开始充电！')
                         break
-                    elif time.time() - t1 > 20:
+                    elif time.time() - t1 > 10:
                         self.get_logger().info('开始充电失败！')
                         break
                     else:
@@ -275,11 +278,16 @@ class BluetoothChargeServer(Node):
                         if self.send_heartbeat_data is not None:
                             await self.bleak_client.write_gatt_char(self.uuid_write,self.send_heartbeat_data)
                             self.send_heartbeat_data = None
+                            self.get_logger().info(f"send heartdata......")
                         if self.disconnect_bluetooth:
                             self.get_logger().info(f"断开蓝牙。")
                             await self.bleak_client.disconnect()
                             break
                     self.charge_state.pid = ""
+                self.get_logger().info("No data received more than 10 seconds.")
+                self.get_logger().info(f"current_time: {time.time()}")
+                self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
+                input('debug')
         except Exception as e:
             self.bluetooth_connected = False
             self.charge_state.pid = ""
@@ -298,7 +306,7 @@ class BluetoothChargeServer(Node):
         data = ','.join('{:02x}'.format(x) for x in data).replace(' ','')
         # 将数据帧转化为列表
         data_list = data.split(',')
-        self.get_logger().info(f'解析后的数据为： {data_list}', throttle_duration_sec=5)
+        self.get_logger().info(f'解析后的数据为： {data_list}')
         # self.get_logger().debug(f'收到服务器的信息: {data}')
         # self.get_logger().debug(f'解析后的数据为: {data_list}', )
         # self.get_logger().debug(f'数据列表长度为: {len(data_list)} 字节')
@@ -315,27 +323,32 @@ class BluetoothChargeServer(Node):
         # 校验数据
         crc8_ = self.crc8(data_list[:-2])
         if crc8_ == data_list[-2].upper():
+            print('hearttime',self.heartbeat_time)
             self.heartbeat_time = time.time()
+            print('update hearttime:',self.heartbeat_time)
             # self.get_logger().debug('数据校验通过！')
             # self.get_logger().info('解析后的数据为：{}'.format(data_list))
             self.udp_data = data_list
             # 判断机器人与充电桩的接触状态与充电状态
             # 通过命令码是否是充电桩工作状态的信息帧
             if data_list[8:10] == ['00', '21']:
+                print('self.charge_state.is_charging:',data_list[12:-2][0])
+                print('self.charge_state.has_contact:',data_list[12:-2][5])
+                print('******************************')
                 if data_list[12:-2][0] == '00':
                     self.charge_state.is_charging = False
-                    self.get_logger().info(f'is_charging: {self.charge_state.is_charging}', throttle_duration_sec=5)
+                    # self.get_logger().info(f'is_charging: {self.charge_state.is_charging}', throttle_duration_sec=5)
                 elif data_list[12:-2][0] == '01':
                     self.charge_state.is_charging = True
-                    self.get_logger().info(f'is_charging: {self.charge_state.is_charging}', throttle_duration_sec=5)
+                    # self.get_logger().info(f'is_charging: {self.charge_state.is_charging}', throttle_duration_sec=5)
                 else:
                     self.get_logger().info('is_charging 数据段数据错误。')
                 if data_list[12:-2][5] == '00':
                     self.charge_state.has_contact = False
-                    self.get_logger().info(f'has_contact: {self.charge_state.has_contact}', throttle_duration_sec=5)
+                    # self.get_logger().info(f'has_contact: {self.charge_state.has_contact}', throttle_duration_sec=5)
                 elif data_list[12:-2][5] == '01':
                     self.charge_state.has_contact = True
-                    self.get_logger().info(f'has_contact: {self.charge_state.has_contact}', throttle_duration_sec=5)
+                    # self.get_logger().info(f'has_contact: {self.charge_state.has_contact}', throttle_duration_sec=5)
                     # now_time = self.get_clock().now()
                     # self.charge_state.stamp = now_time.to_msg()
                 else:
@@ -357,11 +370,11 @@ class BluetoothChargeServer(Node):
                 # 向充电桩发送心跳数据帧
                 self.send_heartbeat_data = bytes.fromhex(''.join(send_d))   
                 
-        # else:
+        else:
             # self.get_logger().debug(f'self crc: {crc8_}')
             # self.get_logger().debug(f'recv crc: {data_list[-2].upper()}')
-            # self.get_logger().info('数据未通过校验,舍弃数据！')
-            # self.get_logger().info('----------------------------')
+            self.get_logger().info('数据未通过校验,舍弃数据！')
+            self.get_logger().info('----------------------------')
 
 
     # CRC-8/MAXIM　x8+x5+x4+1  循环冗余校验 最后在取了反的

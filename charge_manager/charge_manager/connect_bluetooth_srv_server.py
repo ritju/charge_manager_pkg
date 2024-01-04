@@ -16,7 +16,7 @@ import asyncio
 
 start_charge_data = ''
 stop_charge_data = ''
-mac = '94:C9:60:43:BD:FD'
+mac = '94:C9:60:43:BE:FD'
 
 class ConnectBluetoothService(Node):
     

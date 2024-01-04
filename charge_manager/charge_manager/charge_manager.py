@@ -4,12 +4,18 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolicy
 from rclpy.task import Future
+from rclpy.executors import MultiThreadedExecutor
+import psutil
+import subprocess
+from signal import SIGINT
+import time
 
 from std_srvs.srv import Empty
 from std_msgs.msg import Int8
 from std_msgs.msg import String
 from charge_manager_msgs.action import Charge
 from charge_manager_msgs.msg import ChargeState2
+from charge_manager_msgs.msg import BluetoothStatus
 from capella_ros_service_interfaces.msg import ChargeState
 from geometry_msgs.msg import Twist
 
@@ -24,6 +30,10 @@ class chargeManager(Node):
 
         callback_group_type = ReentrantCallbackGroup()
         self.command_publisher = self.create_publisher(Int8, 'bluetooth_command', 1, callback_group=callback_group_type)
+
+        # init bluetooth params
+        self.bluetooth_status = BluetoothStatus.DOWN
+        self.bluetooth_proc = None
 
         # 初始化 self.charger_state
         self.charger_state = ChargeState()
@@ -59,7 +69,13 @@ class chargeManager(Node):
         self.charger_start_docking_service = self.create_service(Empty, '/charger/start_docking', self.charger_start_docking_service_callback, callback_group=callback_group_type)
         
         # /charger/stop_docking
-        self.charger_start_docking_service = self.create_service(Empty, '/charger/stop_docking', self.charger_stop_docking_service_callback, callback_group=callback_group_type)
+        self.charger_stop_docking_service = self.create_service(Empty, '/charger/stop_docking', self.charger_stop_docking_service_callback, callback_group=callback_group_type)
+
+        # /bluetooth/start
+        self.bluetooth_start_service = self.create_service(Empty, '/bluetooth/start', self.bluetooth_start_callback, callback_group=callback_group_type)
+
+        # /bluetooth/stop
+        self.bluetooth_stop_service = self.create_service(Empty, '/bluetooth/stop', self.bluetooth_stop_callback, callback_group=callback_group_type)
 
         self.charge_action_client = ActionClient(self, Charge, 'charge', callback_group=callback_group_type)
       
@@ -69,7 +85,7 @@ class chargeManager(Node):
              zero_cmd = Twist()
              zero_cmd.linear.x = 0.0
              zero_cmd.angular.z = 0.0
-             self.zero_cmd_vel_publisher.publish(zero_cmd)
+            #  self.zero_cmd_vel_publisher.publish(zero_cmd)
 
     def charger_state2_sub_callback(self, msg):
         self.charger_state.pid = msg.pid
@@ -135,12 +151,48 @@ class chargeManager(Node):
     def charge_get_result_callback(self, future):
         result = future.result().result
         self.charger_state.is_docking = False
-        self.get_logger().info('=== Charge action ===     result => success: {}'.format(result.success)) 
+        self.get_logger().info('=== Charge action ===     result => success: {}'.format(result.success))
+    
+    def bluetooth_start_callback(self, request, response):
+        self.get_logger().info('received a request for /bluetooth/start service')
+        
+        if self.bluetooth_proc != None:
+            self.get_logger().info('bluetooth server is online, do noting')
+        else:
+            self.bluetooth_proc = subprocess.Popen(
+                ["ros2", "run", "charge_manager", "charge_bluetooth_old"])
+        
+        time.sleep(10)        # waiting for bluetooth server node setup completed.
+        self.bluetooth_status = BluetoothStatus.UP
+
+        return response
+
+    def bluetooth_stop_callback(self, request, response):
+        self.get_logger().info('received a request for /bluetooth/stop service')
+        if self.bluetooth_proc != None:
+            try:
+                self.terminate(self.bluetooth_proc)
+            except:
+                pass
+            self.bluetooth_proc = None
+        else:
+            self.get_logger().info('bluetooth server is not online, do nothing')
+        self.bluetooth_status = BluetoothStatus.DOWN
+        return response
+    
+    def terminate(self, proc: subprocess.Popen):
+        parent_pid = proc.pid 
+        parent = psutil.Process(parent_pid)
+        for child in parent.children(recursive=True):  # or parent.children() for recursive=False
+            child.send_signal(SIGINT)
+        parent.send_signal(SIGINT)
     
 def main(args=None):
     rclpy.init(args=args)
     charger_manager_node = chargeManager()
-    rclpy.spin(charger_manager_node)
+    multi_executor = MultiThreadedExecutor()
+    multi_executor.add_node(charger_manager_node)
+    multi_executor.spin()
     rclpy.shutdown()
 
 if __name__ == '__main__':
