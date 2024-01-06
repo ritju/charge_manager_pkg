@@ -173,6 +173,7 @@ class ChargeAction(Node):
     # charge_action goal_callback
     def charge_action_goal_callback(self, goal_request):
         self.mac = goal_request.mac
+        self.bluetooth_rebooting_num = -1
         self.get_logger().info('charge_action_goal_callback')
         self.get_logger().info(f'self.mac: {self.mac}')
         if self.dock_executing:
