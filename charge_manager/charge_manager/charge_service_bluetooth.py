@@ -63,9 +63,9 @@ class BluetoothChargeServer(Node):
         # 初始化发送的数据
         self.send_data = None
         # 初始化心跳数据
-        self.send_heartbeat_data = None
+        self.send_heartbeat_data = ['6b', '00', '00', '00', '00', '6b', '00', '00', '00', '21', '09', '00']
         # 初始化本地接收蓝牙的心跳时间(上一次收到蓝牙数据帧的时间)
-        self.heartbeat_time = time.time()
+        self.heartbeat_time = 0
         # 是否断开蓝牙的属性
         self.disconnect_bluetooth = False
         # 通过bssid链接充电桩WIFI服务
@@ -97,6 +97,8 @@ class BluetoothChargeServer(Node):
     # 定时发布充电状态
     def charge_state_pub(self, ):
         while True:
+            if not rclpy.ok():
+                 self.get_logger().info('rclpy\'s context is invalid, exiting...')
             if self.charge_state.pid == '':
                 self.charge_state.pid = ''
                 self.charge_state.has_contact = False
@@ -111,12 +113,13 @@ class BluetoothChargeServer(Node):
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
             self.charge_state_publisher.publish(self.charge_state)
-            if time.time() - self.heartbeat_time > 10:
-                # self.get_logger().info("No data received more than 10 seconds.")
-                # self.get_logger().info(f"current_time: {time.time()}")
-                # self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
+            if time.time() - self.heartbeat_time > 10 and self.bluetooth_connected != None and self.heartbeat_time != 0:
+                self.get_logger().info("No data received more than 10 seconds.")
+                self.get_logger().info(f"current_time: {time.time()}")
+                self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
                 self.charge_state.pid = ''
                 self.disconnect_bluetooth = True
+                self.bluetooth_connected = None
             self.publish_rate.sleep()
 
     def start_stop_charge_callback(self,msgs):
@@ -133,7 +136,7 @@ class BluetoothChargeServer(Node):
                 elif self.charge_state.is_charging == True:
                     self.get_logger().info("早已经在充电了。")
                 # 发送充电数据帧
-                send_d = self.udp_data[:12]
+                send_d = self.send_heartbeat_data.copy()
                 # 设置数据帧的命令码
                 send_d[8] = '80'
                 send_d[9] = '00'
@@ -171,7 +174,7 @@ class BluetoothChargeServer(Node):
                     # 判断当前WiFi连接状态
                     if self.charge_state.is_charging == False:
                         self.get_logger().info('本来就没充电。')
-                    send_d = self.udp_data[:12]
+                    send_d = self.send_heartbeat_data.copy()
                     # 设置数据帧的命令码
                     send_d[8] = '80'
                     send_d[9] = '00'
@@ -240,58 +243,80 @@ class BluetoothChargeServer(Node):
 
     # 创建bleak客户端
     async def create_bleakclient(self,address):
-        self.heartbeat_time = time.time()
         try:
-            # 开始连接蓝牙
-            self.get_logger().info(f"开始创建bleakclient:{address}")
-            if address != '':
-                async with BleakClient(address) as self.bleak_client:
-                    self.disconnect_bluetooth = False
-                    if self.bleak_client.is_connected():
-                        # 获取蓝牙的服务
-                        services = self.bleak_client.services
-                        for service in services:
-                            print('服务的uuid：', service.uuid)
-                            for character in service.characteristics:
-                                # print('特征值uuid：', character.uuid)
-                                # print('特征值属性：', character.properties)
-                                # 获取发送数据的蓝牙服务uuid
-                                if character.properties == ['write-without-response', 'write']:
+            self.uuid_write = None
+            self.uuid_notify = None
+            self.bleak_client = BleakClient(address)
+            await self.bleak_client.connect()
+            print('蓝牙连接成功')
+            print('查找蓝牙服务')
+            services = self.bleak_client.services
+            for service in services:
+                    print('服务的uuid：', service.uuid)
+                    for character in service.characteristics:
+                            # print('特征值uuid：', character.uuid)
+                            # print('特征值属性：', character.properties)
+                            # 获取发送数据的蓝牙服务uuid
+                            if character.properties == ['write-without-response', 'write']:
                                     self.uuid_write = character.uuid
-                                # 获取接收数据的蓝牙服务uuid
-                                elif character.properties == ['read', 'notify']:
+                            # 获取接收数据的蓝牙服务uuid
+                            elif character.properties == ['read', 'notify']:
                                     self.uuid_notify = character.uuid
-                                else:
+                            else:
                                     continue
-                            print('*************************************')
-                    else:
-                        self.bluetooth_connected = False
-                    self.charge_state.pid = address
-                    self.bluetooth_connected = True
-                    while self.bleak_client.is_connected:
-                        await self.bleak_client.start_notify(self.uuid_notify, self.notify_data)
-                        await self.bleak_client.stop_notify(self.uuid_notify)
-                        if self.send_data is not None:
-                            await self.bleak_client.write_gatt_char(self.uuid_write,self.send_data)
-                            self.send_data = None
-                        # 向充电桩发送心跳数据
-                        if self.send_heartbeat_data is not None:
-                            await self.bleak_client.write_gatt_char(self.uuid_write,self.send_heartbeat_data)
-                            self.send_heartbeat_data = None
-                            self.get_logger().info(f"send heartdata......")
+                    print('*************************************')
+            if self.uuid_write != None or self.uuid_notify != None:
+                self.charge_state.pid = address
+                self.bluetooth_connected = True
+                await self.bleak_client.start_notify(self.uuid_notify, self.notify_data)
+                while True:
+                        if  not rclpy.ok():
+                             self._logger().info('rclpy\'s context is invalid, exiting ...')
+                             await self.bleak_client.disconnect()
+                             break
+                        if not self.bleak_client.is_connected:
+                                await self.bleak_client.stop_notify(self.uuid_notify)
+                                break
                         if self.disconnect_bluetooth:
                             self.get_logger().info(f"断开蓝牙。")
                             await self.bleak_client.disconnect()
                             break
-                    self.charge_state.pid = ""
-                self.get_logger().info("No data received more than 10 seconds.")
-                self.get_logger().info(f"current_time: {time.time()}")
-                self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
-                input('debug')
+                        if self.send_data is not None:
+                            await self.bleak_client.write_gatt_char(self.uuid_write,self.send_data)
+                            self.send_data = None
+                        if self.udp_data is not None:
+                                # 回复充电桩
+                                send_d = self.send_heartbeat_data.copy()
+                                # 设置数据帧的命令码
+                                send_d[8] = '80'
+                                send_d[9] = '21'
+                                # 设置数据帧的长度域
+                                send_d[10] = '01'
+                                send_d[11] = '00'
+                                # 设置数据帧的数据域
+                                send_d.append('00')
+                                # 设置数据帧的校验码
+                                send_d.append(self.crc8(send_d))
+                                # 设置数据帧的结束符
+                                send_d.append('16')
+                                # 发送数据帧
+                                self.heart_data = bytes.fromhex(''.join(send_d))
+                                # print('已发送',self.heart_data)
+                                await self.bleak_client.write_gatt_char(self.uuid_write,self.heart_data)
+                        await asyncio.sleep(0.5)
+            else:
+                print('self.uuid_write None or self.uuid_notify None is None')                
+                self.charge_state.pid = ""
+                await self.bleak_client.disconnect()
+                self.bluetooth_connected = False
+            self.charge_state.pid = ""
+            # self.get_logger().info("No data received more than 10 seconds.")
+            # self.get_logger().info(f"current_time: {time.time()}")
+            # self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
         except Exception as e:
             self.bluetooth_connected = False
             self.charge_state.pid = ""
-            self.get_logger().info('连接失败')
+            self.get_logger().info('连接error')
             print(e)
             time.sleep(2)
         
@@ -301,7 +326,7 @@ class BluetoothChargeServer(Node):
     # 接收蓝牙数据的回调函数，解析充电桩发送的数据帧
     def notify_data(self,sender,data ):
         # 接受服务端的数据帧
-        # self.get_logger().debug('-------------------receive data---------------------')
+        self.get_logger().info('-------------------receive data---------------------')
         # 将数据解码
         data = ','.join('{:02x}'.format(x) for x in data).replace(' ','')
         # 将数据帧转化为列表
@@ -323,9 +348,8 @@ class BluetoothChargeServer(Node):
         # 校验数据
         crc8_ = self.crc8(data_list[:-2])
         if crc8_ == data_list[-2].upper():
-            print('hearttime',self.heartbeat_time)
+            print('jian ge shi jian:',time.time() - self.heartbeat_time)
             self.heartbeat_time = time.time()
-            print('update hearttime:',self.heartbeat_time)
             # self.get_logger().debug('数据校验通过！')
             # self.get_logger().info('解析后的数据为：{}'.format(data_list))
             self.udp_data = data_list
@@ -352,23 +376,7 @@ class BluetoothChargeServer(Node):
                     # now_time = self.get_clock().now()
                     # self.charge_state.stamp = now_time.to_msg()
                 else:
-                    self.get_logger().info('has_contact 数据段数据错误。')
-                # 回复充电桩
-                send_d = self.udp_data[:12]
-                # 设置数据帧的命令码
-                send_d[8] = '80'
-                send_d[9] = '21'
-                # 设置数据帧的长度域
-                send_d[10] = '01'
-                send_d[11] = '00'
-                # 设置数据帧的数据域
-                send_d.append('00')
-                # 设置数据帧的校验码
-                send_d.append(self.crc8(send_d))
-                # 设置数据帧的结束符
-                send_d.append('16')
-                # 向充电桩发送心跳数据帧
-                self.send_heartbeat_data = bytes.fromhex(''.join(send_d))   
+                    self.get_logger().info('has_contact 数据段数据错误。')  
                 
         else:
             # self.get_logger().debug(f'self crc: {crc8_}')
