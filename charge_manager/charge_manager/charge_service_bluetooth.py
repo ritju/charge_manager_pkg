@@ -71,17 +71,17 @@ class BluetoothChargeServer(Node):
         # 通过bssid链接充电桩WIFI服务
         self.bluetooth_concact_server = self.create_service(ConnectBluetooth, '/connect_bluetooth', self.connect_bluetooth)
         # # 话题和订阅器的qos
-        # charger_state_qos = QoSProfile(depth=1)
-        # charger_state_qos.reliability = ReliabilityPolicy.RELIABLE
-        # charger_state_qos.history = HistoryPolicy.KEEP_LAST
-        # charger_state_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        charger_state_qos = QoSProfile(depth=1)
+        charger_state_qos.reliability = ReliabilityPolicy.BEST_EFFORT
+        charger_state_qos.history = HistoryPolicy.KEEP_LAST
+        charger_state_qos.durability = DurabilityPolicy.VOLATILE
         # 初始化充电状态信息
         self.charge_state = ChargeState2()
         self.charge_state.pid = ""
         self.charge_state.has_contact = False
         self.charge_state.is_charging = False
         # 在机器人状态发布器
-        self.charge_state_publisher = self.create_publisher(ChargeState2, '/charger/state2',10)
+        self.charge_state_publisher = self.create_publisher(ChargeState2, '/charger/state2', charger_state_qos, callback_group=ReentrantCallbackGroup())
         self.publish_rate = self.create_rate(20)
         # 创建充电服务
         self.start_stop_charge_server = self.create_subscription(Int8, '/bluetooth_command', self.start_stop_charge_callback, 5, callback_group=ReentrantCallbackGroup())
@@ -237,7 +237,7 @@ class BluetoothChargeServer(Node):
             self.get_logger().info('蓝牙连接成功.')
             response.success = True
         else:
-            self.get_logger().info('蓝牙连失败.')
+            self.get_logger().info('蓝牙连接失败.')
             response.success = False
         return response
 
@@ -248,11 +248,12 @@ class BluetoothChargeServer(Node):
             self.uuid_notify = None
             self.bleak_client = BleakClient(address)
             await self.bleak_client.connect()
-            print('蓝牙连接成功')
-            print('查找蓝牙服务')
+            self.disconnect_bluetooth = False
+            # print('蓝牙连接成功')
+            # print('查找蓝牙服务')
             services = self.bleak_client.services
             for service in services:
-                    print('服务的uuid：', service.uuid)
+                    # print('服务的uuid：', service.uuid)
                     for character in service.characteristics:
                             # print('特征值uuid：', character.uuid)
                             # print('特征值属性：', character.properties)
@@ -264,7 +265,7 @@ class BluetoothChargeServer(Node):
                                     self.uuid_notify = character.uuid
                             else:
                                     continue
-                    print('*************************************')
+                    # print('*************************************')
             if self.uuid_write != None or self.uuid_notify != None:
                 self.charge_state.pid = address
                 self.bluetooth_connected = True
@@ -316,8 +317,8 @@ class BluetoothChargeServer(Node):
         except Exception as e:
             self.bluetooth_connected = False
             self.charge_state.pid = ""
-            self.get_logger().info('连接error')
-            print(e)
+            self.get_logger().info('catch exception ......')
+            print('exception: ',e)
             time.sleep(2)
         
     def bluetooth_thread(self,mac_address):
@@ -326,12 +327,12 @@ class BluetoothChargeServer(Node):
     # 接收蓝牙数据的回调函数，解析充电桩发送的数据帧
     def notify_data(self,sender,data ):
         # 接受服务端的数据帧
-        self.get_logger().info('-------------------receive data---------------------')
+        # self.get_logger().info('-------------------receive data---------------------')
         # 将数据解码
         data = ','.join('{:02x}'.format(x) for x in data).replace(' ','')
         # 将数据帧转化为列表
         data_list = data.split(',')
-        self.get_logger().info(f'解析后的数据为： {data_list}')
+        self.get_logger().info(f'解析后的数据为： {data_list}', throttle_duration_sec=10)
         # self.get_logger().debug(f'收到服务器的信息: {data}')
         # self.get_logger().debug(f'解析后的数据为: {data_list}', )
         # self.get_logger().debug(f'数据列表长度为: {len(data_list)} 字节')
@@ -348,7 +349,7 @@ class BluetoothChargeServer(Node):
         # 校验数据
         crc8_ = self.crc8(data_list[:-2])
         if crc8_ == data_list[-2].upper():
-            print('jian ge shi jian:',time.time() - self.heartbeat_time)
+            # print('jian ge shi jian:',time.time() - self.heartbeat_time)
             self.heartbeat_time = time.time()
             # self.get_logger().debug('数据校验通过！')
             # self.get_logger().info('解析后的数据为：{}'.format(data_list))
@@ -356,9 +357,9 @@ class BluetoothChargeServer(Node):
             # 判断机器人与充电桩的接触状态与充电状态
             # 通过命令码是否是充电桩工作状态的信息帧
             if data_list[8:10] == ['00', '21']:
-                print('self.charge_state.is_charging:',data_list[12:-2][0])
-                print('self.charge_state.has_contact:',data_list[12:-2][5])
-                print('******************************')
+                # print('self.charge_state.is_charging:',data_list[12:-2][0])
+                # print('self.charge_state.has_contact:',data_list[12:-2][5])
+                # print('******************************')
                 if data_list[12:-2][0] == '00':
                     self.charge_state.is_charging = False
                     # self.get_logger().info(f'is_charging: {self.charge_state.is_charging}', throttle_duration_sec=5)

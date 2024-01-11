@@ -44,17 +44,26 @@ class chargeManager(Node):
 
         # /charger/id subscription
         charger_id_sub_qos = QoSProfile(depth=1)
-        charger_id_sub_qos.reliability = ReliabilityPolicy.RELIABLE
-        charger_id_sub_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        charger_id_sub_qos.reliability = ReliabilityPolicy.BEST_EFFORT
         charger_id_sub_qos.history = HistoryPolicy.KEEP_LAST
+        charger_id_sub_qos.durability = DurabilityPolicy.VOLATILE
         self.charger_id_sub = self.create_subscription(String, '/charger/id', self.charger_id_sub_callback, charger_id_sub_qos)
         
-        # 订阅蓝牙server发送的 ChargeState2
-        self.charger_state2_sub_ = self.create_subscription(ChargeState2, '/charger/state2', self.charger_state2_sub_callback, 5, callback_group=callback_group_type)
+        charger_state_qos = QoSProfile(depth=1)
+        charger_state_qos.reliability = ReliabilityPolicy.BEST_EFFORT
+        charger_state_qos.history = HistoryPolicy.KEEP_LAST
+        charger_state_qos.durability = DurabilityPolicy.VOLATILE
 
-        # 初始化 /charger/state publisher
-        self.charger_state_publisher = self.create_publisher(ChargeState, '/charger/state', 5, callback_group=callback_group_type)
-        self.timer_pub_charger_state = self.create_timer(0.2, self.timer_pub_charger_state_callback, callback_group=callback_group_type)
+        charger_state_qos2 = QoSProfile(depth=1)
+        charger_state_qos2.reliability = ReliabilityPolicy.RELIABLE
+        charger_state_qos2.history = HistoryPolicy.KEEP_LAST
+        charger_state_qos2.durability = DurabilityPolicy.VOLATILE
+        # 订阅蓝牙server发送的 ChargeState2
+        self.charger_state2_sub_ = self.create_subscription(ChargeState2, '/charger/state2', self.charger_state2_sub_callback, charger_state_qos, callback_group=callback_group_type)
+
+        # 初始化 /charger/state publisher        
+        self.charger_state_publisher = self.create_publisher(ChargeState, '/charger/state', charger_state_qos2, callback_group=callback_group_type)
+        self.timer_pub_charger_state = self.create_timer(0.05, self.timer_pub_charger_state_callback, callback_group=callback_group_type)
         
         # 初始化 zero_cmd_vel_publisher
         self.zero_cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 1, callback_group=callback_group_type)
