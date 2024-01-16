@@ -138,7 +138,7 @@ class ChargeAction(Node):
             self.get_logger().info(f'bluetooth server node online: {self.bluetooth_setup}, reboot numbers: {self.bluetooth_rebooting_num}.', throttle_duration_sec = 5)
 
         
-        # self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=3)
+        self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=3)
         if self.bluetooth_setup:
             if not self.bluetooth_connected and  not self.connect_bluetooth_executing :
                 self.connect_bluetooth_executing = True
@@ -278,11 +278,11 @@ class ChargeAction(Node):
     
     def dock_feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
-        # self.get_logger().info('***************** Dock Feedback *****************')
-        # self.get_logger().info('dock feedback => sees_dock : {}'.format(feedback.sees_dock))
-        # self.get_logger().info('dock feedback => state     : {}'.format(feedback.state))
-        # self.get_logger().info('dock feedback => infos     : {}'.format(feedback.infos))
-        # self.get_logger().info('*************************************************')
+        self.get_logger().info('***************** Dock Feedback *****************')
+        self.get_logger().info('dock feedback => sees_dock : {}'.format(feedback.sees_dock))
+        self.get_logger().info('dock feedback => state     : {}'.format(feedback.state))
+        self.get_logger().info('dock feedback => infos     : {}'.format(feedback.infos))
+        self.get_logger().info('*************************************************')
 
     def dock_response_callback(self, future):
         goal_handle = future.result()
