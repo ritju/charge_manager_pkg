@@ -104,7 +104,8 @@ class chargeManager(Node):
             self.charger_state.is_docking = False
     
     def charger_id_sub_callback(self, msg):
-        self.mac = msg.data
+        if msg.data != '':
+            self.mac = msg.data
     
     def charger_start_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start service')
