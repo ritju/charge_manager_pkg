@@ -19,6 +19,7 @@ from capella_ros_msg.msg import Battery
 from capella_ros_service_interfaces.msg import ChargeState
 from std_srvs.srv import Empty
 from std_msgs.msg import Bool
+from geometry_msgs.msg import Twist
 
 class ChargeActionState():
     idle = 'idle'
@@ -43,6 +44,18 @@ class ChargeAction(Node):
         self.cb_group = ReentrantCallbackGroup()
 
         self.init_params() 
+
+        # 初始化 zero_cmd_vel_publisher
+        self.zero_cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 1, callback_group=self.cb_group)
+        self.msg_zero_cmd = Twist()
+        self.msg_zero_cmd.linear.x = 0.0
+        self.msg_zero_cmd.angular.z = 0.0
+
+        # sub for is_undocking_state
+        self.is_undocking_state = False
+        self.is_undocking_state_last_time = time.time()
+        self.is_undocking_state_sub_ = self.create_subscription(Bool, 'is_undocking_state', self.is_undocking_state_sub_callback, 1, callback_group=self.cb_group)
+
 
         # sub for battery
         self.battery_sub_ = self.create_subscription(Battery, 'battery', self.battery_sub_callback, 10, callback_group=self.cb_group)
@@ -111,6 +124,10 @@ class ChargeAction(Node):
         self.bluetooth_connect_num = 0
         self.bluetooth_connect_num_max = 990000
 
+    def is_undocking_state_sub_callback(self, msg):
+        self.is_undocking_state = msg.data
+        self.is_undocking_state_last_time = time.time()
+    
     def battery_sub_callback(self, msg):
         self.battery_ = msg.res_cap
     
@@ -225,7 +242,12 @@ class ChargeAction(Node):
                     self.goal_handle.succeed()
                     return result
                 else:                    
+                    now_time = time.time()
                     self.is_docking_state_pub.publish(msg_state_pub)
+                    if now_time - self.is_undocking_state_last_time > 5.0:
+                        self.is_undocking_state = False
+                    if not self.is_undocking_state:    
+                        self.zero_cmd_vel_publisher.publish(self.msg_zero_cmd)
                     time.sleep(1)
             else:
                 self.is_docking_state_pub.publish(msg_state_pub)
