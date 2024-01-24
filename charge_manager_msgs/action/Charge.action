@@ -1,5 +1,6 @@
 string mac
 string behavior_tree
+uint8 restore
 ---
 bool success
 ---

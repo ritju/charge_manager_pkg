@@ -223,6 +223,14 @@ class ChargeAction(Node):
         self.get_logger().info("charge_action_execute_callback.")
         self.init_params()
         self.mac = goal_handle.request.mac
+        restore = goal_handle.request.restore
+        if restore:
+            self.dock_completed = True
+            self.charger_position_bool = True
+        
+        with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
+            f.write('1\n')
+            f.write(self.mac)
 
         self.feedback_msg = Charge.Feedback()
         self.feedback_msg.state = ChargeActionState.idle
@@ -240,6 +248,9 @@ class ChargeAction(Node):
                     result = Charge.Result()
                     result.success = True
                     self.goal_handle.succeed()
+                    with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
+                        f.write('0\n')
+                        f.write(self.mac)
                     return result
                 else:                    
                     now_time = time.time()
