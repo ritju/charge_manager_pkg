@@ -11,8 +11,11 @@ from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolicy
 # 蓝牙模块相关的库
 import asyncio
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
+import subprocess
+import psutil
+from signal import SIGINT, SIGTERM
 
 from rclpy.callback_groups import ReentrantCallbackGroup
 
@@ -93,9 +96,35 @@ class BluetoothChargeServer(Node):
 
         self.get_logger().info("Bluetooth charge Server starting")
 
+    def terminate(self, proc: subprocess.Popen):
+        parent_pid = proc.pid 
+        parent = psutil.Process(parent_pid)
+        index = 1
+        self.get_logger().info(f'parent\'childeren num: {len(parent.children(recursive=True))}')
+        for child in parent.children(recursive=True):  # or parent.children() for recursive=False
+            self.get_logger().info(f'child_{index}\'s children num: {len(child.children(recursive=True))}')
+            self.get_logger().info(f'Terminating child {index}, pid: {child.pid} ......')
+            child.send_signal(SIGINT)
+            rt_code = child.wait(2)
+            if rt_code == None:
+                self.get_logger().info(f'Terminate child {index} (pid: {child.pid}) failed.')
+                cmd = f'/usr/bin/kill -9 {child.pid}'
+                self.get_logger().info(f'execute "{cmd}" for kill child process.')
+                os.system(cmd)
+            else:
+                self.get_logger().info(f'Terminate child {index} (pid: {child.pid}) success. rt_code: {rt_code}')            
+            index += 1
+
+        parent.send_signal(SIGINT)
+        rt_code = parent.wait(2)
+        if rt_code == None:
+                self.get_logger().info(f'Terminate parent (pid: {parent.pid}) failed.')
+        else:
+            self.get_logger().info(f'Terminate parent (pid: {parent.pid}) success. rt_code: {rt_code}')
 
     # 定时发布充电状态
     def charge_state_pub(self, ):
+        self.get_logger().info(f'charger_state_pub thread => Process: {os.getpid()}, Thread: {threading.get_ident()}')
         while True:
             if not rclpy.ok():
                  self.get_logger().info('rclpy\'s context is invalid, exiting...')
@@ -113,8 +142,8 @@ class BluetoothChargeServer(Node):
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
             self.charge_state_publisher.publish(self.charge_state)
-            if time.time() - self.heartbeat_time > 10 and self.bluetooth_connected != None and self.heartbeat_time != 0:
-                self.get_logger().info("No data received more than 10 seconds.")
+            if time.time() - self.heartbeat_time > 20 and self.bluetooth_connected != None and self.heartbeat_time != 0:
+                self.get_logger().info("No data received more than 20 seconds.")
                 self.get_logger().info(f"current_time: {time.time()}")
                 self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
                 self.charge_state.pid = ''
@@ -210,13 +239,17 @@ class BluetoothChargeServer(Node):
     # 连接充电桩蓝牙
     def connect_bluetooth(self,request, response):
         self.get_logger().info("正在重启蓝牙...")
-        os.system('sudo rfkill block bluetooth') # bluetoothctl power off
+        # print(os.system('sudo rfkill block bluetooth')) # bluetoothctl power off
+        blue_stop = subprocess.Popen(['sudo', 'rfkill', 'block', 'bluetooth'])
         time.sleep(2)
+        self.terminate(blue_stop)
         self.charge_state.pid = ''
         self.charge_state.has_contact = False
         self.charge_state.is_charging = False
-        os.system('sudo rfkill unblock bluetooth')# bluetoothctl power on
+        # print(os.system('sudo rfkill unblock bluetooth')) # bluetoothctl power on
+        blue_start = subprocess.Popen(['sudo', 'rfkill', 'unblock', 'bluetooth'])
         time.sleep(2)
+        self.terminate(blue_start)
         self.bluetooth_connected = None
         b_thread = threading.Thread(target=self.bluetooth_thread,kwargs={'mac_address':request.mac})
         b_thread.start()
@@ -225,11 +258,8 @@ class BluetoothChargeServer(Node):
         while True:
             if self.bluetooth_connected != None:
                 break
-            elif time.time() - start_time > 10.0:
-                self.get_logger().info('蓝牙连接超时')
-                break
-            elif not self.bluetooth_connected:              
-                self.get_logger().info("等待蓝牙连接。。。。。。")
+            else:              
+                self.get_logger().info(f"等待蓝牙连接: {request.mac} ......")
                 time.sleep(3)
                 continue
         # 判断蓝牙连接结果
@@ -244,6 +274,24 @@ class BluetoothChargeServer(Node):
     # 创建bleak客户端
     async def create_bleakclient(self,address):
         try:
+            self.get_logger().info("搜索附近的蓝牙......")
+            devices = await BleakScanner().discover(return_adv=True)
+            devices_num = len(devices)
+            self.get_logger().info(f'共搜索到 {devices_num} 个蓝牙信号。')
+            self.bluetooth_searched = False
+            if devices_num > 0:
+                self.get_logger().info('--------Mac-------- | --------Name-------')
+                for key in devices:
+                    self.get_logger().info(f'{key}   | {devices[key][1].local_name}')
+                    if key == address:
+                        self.bluetooth_searched = True
+                        ble_device = key
+            if self.bluetooth_searched:
+                self.get_logger().info(f'搜索到mac: {address}')
+            else:
+                self.get_logger().info(f'未搜索到mac: {address}')               
+                
+                        
             self.uuid_write = None
             self.uuid_notify = None
             self.bleak_client = BleakClient(address)
@@ -318,10 +366,11 @@ class BluetoothChargeServer(Node):
             self.bluetooth_connected = False
             self.charge_state.pid = ""
             self.get_logger().info('catch exception ......')
-            print('exception: ',e)
+            self.get_logger().info(f'exception: {str(e)}')
             time.sleep(2)
         
     def bluetooth_thread(self,mac_address):
+        self.get_logger().info(f'bluetooth thread => Process: {os.getpid()}, Thread: {threading.get_ident()}')
         asyncio.run(self.create_bleakclient(mac_address))
 
     # 接收蓝牙数据的回调函数，解析充电桩发送的数据帧

@@ -12,12 +12,12 @@ from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolic
 import time
 import threading
 
-from charge_manager_msgs.srv import ConnectBluetooth
+from charge_manager_msgs.srv import ConnectBluetooth, StartBluetooth, StopBluetooth
 from charge_manager_msgs.action import Charge
 from capella_ros_dock_msgs.action import Dock
 from capella_ros_msg.msg import Battery
 from capella_ros_service_interfaces.msg import ChargeState
-from std_srvs.srv import Empty
+from std_srvs.srv import Empty as EmptyForSrv
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 
@@ -36,6 +36,7 @@ class ChargeAction(Node):
         self.get_logger().info('*** charge action ***     started.')
         self.battery_ = 0.0
         self.bluetooth_rebooting_num = -1
+        self.bluetooth_rebooting_num_last = -1
         self.bluetooth_setup = False
         self.bluetooth_reboot_requested = True
         self.charger_position_bool = False
@@ -84,12 +85,12 @@ class ChargeAction(Node):
         self.dock_client_ = ActionClient(self, Dock, "dock", callback_group=self.cb_group)
 
         # /charger/start client
-        self.charger_start_client_ = self.create_client(Empty, '/charger/start', callback_group=self.cb_group)
+        self.charger_start_client_ = self.create_client(EmptyForSrv, '/charger/start', callback_group=self.cb_group)
         self.charger_start_client_last_request_time = time.time()
 
         # bluetooth start/stop client
-        self.bluetooth_start_client_ = self.create_client(Empty, '/bluetooth/start', callback_group=self.cb_group)
-        self.bluetooth_stop_client_ = self.create_client(Empty, '/bluetooth/stop', callback_group=self.cb_group)
+        self.bluetooth_start_client_ = self.create_client(StartBluetooth, '/bluetooth/start', callback_group=self.cb_group)
+        self.bluetooth_stop_client_ = self.create_client(StopBluetooth, '/bluetooth/stop', callback_group=self.cb_group)
         
         # 创建 charge action 服务端
         self.charge_action_server_ = ActionServer(self, Charge, 'charge', 
@@ -107,6 +108,7 @@ class ChargeAction(Node):
         self.future_connect_bluetooth = None
         self.bluetooth_rebooting = False
         self.bluetooth_connected_time = 0.0
+        self.bluetooth_node_stopped = True
 
         # 蓝牙连接和dock对接状态控制,避免执行状态中再次重复发送goal
         self.dock_executing = False
@@ -122,7 +124,7 @@ class ChargeAction(Node):
         self.stop_loop = False
 
         self.bluetooth_connect_num = 0
-        self.bluetooth_connect_num_max = 990000
+        self.bluetooth_connect_num_max = 2
 
     def is_undocking_state_sub_callback(self, msg):
         self.is_undocking_state = msg.data
@@ -141,21 +143,23 @@ class ChargeAction(Node):
         self.charger_position_bool = msg.data
 
     def timer_loop_callback(self):
-        if not self.bluetooth_setup and self.bluetooth_reboot_requested:
+        if not self.bluetooth_setup and self.bluetooth_reboot_requested and self.bluetooth_node_stopped:
             self.get_logger().info('setup bluetooth server node ......')
-            self.bluetooth_reboot_requested = False
-            self.connect_bluetooth_executing = False
-            self.bluetooth_rebooting_num += 1
-            self.bluetooth_start_future = self.bluetooth_start_client_.call_async(Empty.Request())
-            self.bluetooth_start_future.add_done_callback(self.bluetooth_start_future_done_callback)
+            if self.bluetooth_start_client_.wait_for_service(1):
+                self.bluetooth_reboot_requested = False
+                self.connect_bluetooth_executing = False
+                self.bluetooth_rebooting_num += 1
+                self.get_logger().info(f'-------- call /bluetooth/start service --------')
+                self.bluetooth_start_future = self.bluetooth_start_client_.call_async(StartBluetooth.Request())
+                self.bluetooth_start_future.add_done_callback(self.bluetooth_start_future_done_callback)
+            else:
+                self.get_logger().info('bluetooth/start service not on line, waiting', throttle_duration_sec = 5)
 
-        if self.bluetooth_setup:
-            self.get_logger().info(f'bluetooth server node online: {self.bluetooth_setup}, reboot numbers: {self.bluetooth_rebooting_num}.', throttle_duration_sec = 5)
-        else:
-            self.get_logger().info(f'bluetooth server node online: {self.bluetooth_setup}, reboot numbers: {self.bluetooth_rebooting_num}.', throttle_duration_sec = 5)
-
-        
-        self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=3)
+        if self.bluetooth_rebooting_num_last != self.bluetooth_rebooting_num:
+            self.get_logger().info(f'bluetooth server node reboot numbers: {self.bluetooth_rebooting_num}.')
+            self.bluetooth_rebooting_num_last = self.bluetooth_rebooting_num
+                
+        # self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=10)
         if self.bluetooth_setup:
             if not self.bluetooth_connected and  not self.connect_bluetooth_executing :
                 self.connect_bluetooth_executing = True
@@ -168,7 +172,7 @@ class ChargeAction(Node):
                 self.future_connect_bluetooth = self.connect_bluetooth_client_.call_async(request)
                 self.future_connect_bluetooth.add_done_callback(self.connect_bluetooth_done_callback)                   
         else:
-            self.get_logger().info('waiting for bluetooth node ...', throttle_duration_sec = 3)
+            self.get_logger().info('waiting for bluetooth node ...', throttle_duration_sec = 10)
 
         if not self.dock_executing and not self.dock_completed:
             self.dock_executing = True
@@ -180,7 +184,7 @@ class ChargeAction(Node):
             self.dock_client_sendgoal_future.add_done_callback(self.dock_response_callback)
         else:
             if self.charger_state.has_contact and not self.charger_state.is_charging:
-                request = Empty.Request()
+                request = EmptyForSrv.Request()
                 if time.time() - self.charger_start_client_last_request_time > 2.0:
                     self.charger_start_client_.call_async(request)
                     self.charger_start_client_last_request_time = time.time()
@@ -203,6 +207,7 @@ class ChargeAction(Node):
     def charge_action_goal_callback(self, goal_request):
         self.mac = goal_request.mac
         self.bluetooth_rebooting_num = -1
+        self.bluetooth_rebooting_num_last = -1
         self.get_logger().info('charge_action_goal_callback')
         self.get_logger().info(f'self.mac: {self.mac}')
         if self.dock_executing:
@@ -223,6 +228,15 @@ class ChargeAction(Node):
         self.get_logger().info("charge_action_execute_callback.")
         self.init_params()
         self.mac = goal_handle.request.mac
+        restore = goal_handle.request.restore
+        charge_type = goal_handle.request.type
+        if restore or charge_type:
+            self.dock_completed = True
+            self.charger_position_bool = True
+        
+        with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
+            f.write('1\n')
+            f.write(self.mac)
 
         self.feedback_msg = Charge.Feedback()
         self.feedback_msg.state = ChargeActionState.idle
@@ -240,6 +254,9 @@ class ChargeAction(Node):
                     result = Charge.Result()
                     result.success = True
                     self.goal_handle.succeed()
+                    with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
+                        f.write('0\n')
+                        f.write(self.mac)
                     return result
                 else:                    
                     now_time = time.time()
@@ -263,7 +280,7 @@ class ChargeAction(Node):
                     break
             else:
                 continue
-            time.sleep(0.2)
+            time.sleep(1)
 
     
     # charge_action cancel callback
@@ -280,10 +297,13 @@ class ChargeAction(Node):
 
     def connect_bluetooth_done_callback(self, future_connect_bluetooth):
         response = future_connect_bluetooth.result()
+        self.get_logger().info(f'bluetooth connection {"True" if response.success else "False"}, cost {response.connection_time} seconds, result =>{response.result}')
         self.bluetooth_connected = response.success
         self.bluetooth_connected_time = time.time()
         if response.success:
             self.bluetooth_connect_num = 0
+            self.bluetooth_rebooting_num = -1
+            self.bluetooth_rebooting_num_last = -1
         
         if self.bluetooth_connect_num >= self.bluetooth_connect_num_max and not response.success:
             num_old = self.bluetooth_connect_num
@@ -291,11 +311,11 @@ class ChargeAction(Node):
             self.bluetooth_reboot_requested = True
             self.bluetooth_rebooting = True
             self.bluetooth_setup = False
-            self.get_logger().info(f'bluetooth_connect_num is {num_old} >= {self.bluetooth_connect_num_max}, reboot bluetooth server node')
-            self.bluetooth_stop_future = self.bluetooth_stop_client_.call_async(Empty.Request())
+            # self.get_logger().info(f'bluetooth_connect_num is {num_old} >= {self.bluetooth_connect_num_max}, reboot bluetooth server node')
+            self.get_logger().info('-------- call /bluetooth/stop service --------')
+            self.bluetooth_stop_future = self.bluetooth_stop_client_.call_async(StopBluetooth.Request())
             self.bluetooth_stop_future.add_done_callback(self.bluetooth_stop_future_done_callback)      
             
-        self.get_logger().info(f'bluetooth connection {"True" if response.success else "False"}, cost {response.connection_time} seconds, result =>{response.result}')
         self.connect_bluetooth_executing = False
     
     def dock_feedback_callback(self, feedback_msg):
@@ -325,14 +345,25 @@ class ChargeAction(Node):
         self.dock_completed = True
     
     def bluetooth_stop_future_done_callback(self, future):
-        time.sleep(6)
-        self.get_logger().info('stop bluetooth node success.')
-        self.bluetooth_setup = False
+        response = future.result()
+        if response.success:
+            self.get_logger().info(f'infos: {response.infos}')
+            self.bluetooth_setup = False
+            self.bluetooth_node_stopped = True
+        else:
+            self.get_logger().warn(f'infos: {response.infos}')
+
 
     def bluetooth_start_future_done_callback(self, future):
-        self.get_logger().info('start bluetooth node success')
-        self.bluetooth_setup = True
-        self.bluetooth_rebooting = False
+        response = future.result()
+        if response.success:
+            self.get_logger().info(f'infos: {response.infos}')
+            self.bluetooth_setup = True
+            self.bluetooth_node_stopped = False
+            self.bluetooth_rebooting = False
+        else:
+            self.get_logger().warn(f'infos: {response.infos}')
+            self.bluetooth_rebooting = False
 
 
 def main(args=None):

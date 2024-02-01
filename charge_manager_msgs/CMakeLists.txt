@@ -17,6 +17,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ChargeState2.msg"
   "msg/BluetoothStatus.msg"
   "srv/ConnectBluetooth.srv"
+  "srv/StartBluetooth.srv"
+  "srv/StopBluetooth.srv"
   "action/Charge.action"
   DEPENDENCIES capella_ros_service_interfaces
   )

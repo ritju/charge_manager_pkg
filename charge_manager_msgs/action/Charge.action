@@ -1,5 +1,12 @@
+uint8 AUTO = 0
+uint8 MANUAL = 1
+uint8 UNRESTORE = 0
+uint8 RESTORE = 1
+
 string mac
 string behavior_tree
+uint8 restore
+uint8 type
 ---
 bool success
 ---
