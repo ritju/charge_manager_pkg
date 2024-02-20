@@ -207,16 +207,16 @@ class ChargeAction(Node):
         
 
     # charge_action goal_callback
-    def charge_action_goal_callback(self, goal_request):
-        self.mac = goal_request.mac
-        self.bluetooth_rebooting_num = -1
-        self.bluetooth_rebooting_num_last = -1
-        self.get_logger().info('charge_action_goal_callback')
-        self.get_logger().info(f'self.mac: {self.mac}')
+    def charge_action_goal_callback(self, goal_request):        
         if self.msg_state_pub.data:
             self.get_logger().info('Received new Charge Action when executing Charge action. Reject')
             return GoalResponse.REJECT
         else:
+            self.mac = goal_request.mac
+            self.bluetooth_rebooting_num = -1
+            self.bluetooth_rebooting_num_last = -1
+            self.get_logger().info('charge_action_goal_callback')
+            self.get_logger().info(f'self.mac: {self.mac}')
             self.msg_state_pub.data = True            
             self.get_logger().info('Received a Charge Action, accepted and executing.')
             return GoalResponse.ACCEPT
