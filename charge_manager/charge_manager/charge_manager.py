@@ -241,16 +241,19 @@ class chargeManager(Node):
         parent = psutil.Process(parent_pid)
         index = 1
         self.get_logger().info(f'parent\'childeren num: {len(parent.children(recursive=True))}')
+        for child in parent.children(recursive=True):
+            self.get_logger().info(f'child pid: {child.pid}, name: {child.name()}')
+            self.get_logger().info(f'-----------------------------------------------------------')
         for child in parent.children(recursive=True):  # or parent.children() for recursive=False
             self.get_logger().info(f'child_{index}\'s children num: {len(child.children(recursive=True))}')
-            self.get_logger().info(f'Terminating child {index}, pid: {child.pid} ......')
-            child.send_signal(SIGINT)
+            self.get_logger().info(f'Terminating child {index}, pid: {child.pid}, name: {child.name()} ......')
+            child.terminate()
             rt_code = child.wait(5)
             if rt_code == None:
-                self.get_logger().info(f'Terminate child {index} (pid: {child.pid}) failed.')
-                cmd = f'/usr/bin/kill -9 {child.pid}'
-                self.get_logger().info(f'execute "{cmd}" for kill child process.')
-                os.system(cmd)
+                self.get_logger().info(f'Terminate child {index} (pid: {child.pid}) failed.(need fixed.)')
+                # cmd = f'/usr/bin/kill -9 {child.pid}'
+                # self.get_logger().info(f'execute "{cmd}" for kill child process.')
+                # os.system(cmd)
             else:
                 self.get_logger().info(f'Terminate child {index} (pid: {child.pid}) success. rt_code: {rt_code}')            
             index += 1
