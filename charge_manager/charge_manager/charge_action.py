@@ -40,6 +40,9 @@ class ChargeAction(Node):
         self.bluetooth_setup = False
         self.bluetooth_reboot_requested = True
         self.charger_position_bool = False
+        
+        self.msg_state_pub = Bool()
+        self.msg_state_pub.data = False
 
         # 定义 callback_group 类型
         self.cb_group = ReentrantCallbackGroup()
@@ -101,7 +104,7 @@ class ChargeAction(Node):
                                                   cancel_callback=self.charge_action_cancel_callback,
                                                   )
         
-    def init_params(self):
+    def init_params(self):        
         # 初始化蓝牙相关参数
         self.mac = ''
         self.bluetooth_connected = False
@@ -112,7 +115,7 @@ class ChargeAction(Node):
 
         # 蓝牙连接和dock对接状态控制,避免执行状态中再次重复发送goal
         self.dock_executing = False
-        self.connect_bluetooth_executing = False
+        self.connect_bluetooth_executing = False       
 
         # init self.charger_state
         self.charger_state = ChargeState()
@@ -210,10 +213,11 @@ class ChargeAction(Node):
         self.bluetooth_rebooting_num_last = -1
         self.get_logger().info('charge_action_goal_callback')
         self.get_logger().info(f'self.mac: {self.mac}')
-        if self.dock_executing:
-            self.get_logger().info('Received new Charge Action when executing Charge action.')
-            return GoalResponse.ACCEPT
+        if self.msg_state_pub.data:
+            self.get_logger().info('Received new Charge Action when executing Charge action. Reject')
+            return GoalResponse.REJECT
         else:
+            self.msg_state_pub.data = True            
             self.get_logger().info('Received a Charge Action, accepted and executing.')
             return GoalResponse.ACCEPT
 
@@ -245,8 +249,6 @@ class ChargeAction(Node):
         self.loop_thread.start()
 
         while True:
-            msg_state_pub = Bool()
-            msg_state_pub.data = True 
             if self.dock_completed:
                 if not self.charger_position_bool and not self.charger_state.has_contact:
                     time.sleep(1)
@@ -257,17 +259,18 @@ class ChargeAction(Node):
                     with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
                         f.write('0\n')
                         f.write(self.mac)
+                    self.msg_state_pub.data = False
                     return result
                 else:                    
                     now_time = time.time()
-                    self.is_docking_state_pub.publish(msg_state_pub)
+                    self.is_docking_state_pub.publish(self.msg_state_pub)
                     if now_time - self.is_undocking_state_last_time > 5.0:
                         self.is_undocking_state = False
                     if not self.is_undocking_state:    
                         self.zero_cmd_vel_publisher.publish(self.msg_zero_cmd)
                     time.sleep(1)
             else:
-                self.is_docking_state_pub.publish(msg_state_pub)
+                self.is_docking_state_pub.publish(self.msg_state_pub)
                 time.sleep(1)
             
     def loop_(self):
