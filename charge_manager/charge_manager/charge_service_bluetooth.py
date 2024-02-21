@@ -258,6 +258,11 @@ class BluetoothChargeServer(Node):
         while True:
             if self.bluetooth_connected != None:
                 break
+            elif time.time() - start_time > 25:
+                self.get_logger().info(f"连接蓝牙超时: {request.mac} ......")
+                self.bluetooth_connected = False
+                self.disconnect_bluetooth = True
+                break
             else:              
                 self.get_logger().info(f"等待蓝牙连接: {request.mac} ......")
                 time.sleep(3)
