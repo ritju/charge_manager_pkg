@@ -1,0 +1,143 @@
+1709024835.877774 [0] charge_act: config: Domain/General/MulticastRecvNetworkInterfaceAddresses/#text: preferred {}
+1709024835.877844 [0] charge_act: config: Domain/General/Interfaces/NetworkInterface[@autodetermine]: false {}
+1709024835.877859 [0] charge_act: config: Domain/General/Interfaces/NetworkInterface[@name]: docker0 {1}
+1709024835.877869 [0] charge_act: config: Domain/General/Interfaces/NetworkInterface[@address]:  {}
+1709024835.877879 [0] charge_act: config: Domain/General/Interfaces/NetworkInterface[@priority]: default {1}
+1709024835.877889 [0] charge_act: config: Domain/General/Interfaces/NetworkInterface[@prefer_multicast]: false {}
+1709024835.877898 [0] charge_act: config: Domain/General/Interfaces/NetworkInterface[@presence_required]: true {}
+1709024835.877908 [0] charge_act: config: Domain/General/Interfaces/NetworkInterface[@multicast]: default {1}
+1709024835.877917 [0] charge_act: config: Domain/General/ExternalNetworkAddress/#text: auto {}
+1709024835.877924 [0] charge_act: config: Domain/General/ExternalNetworkMask/#text: 0.0.0.0 {}
+1709024835.877931 [0] charge_act: config: Domain/General/AllowMulticast/#text: default {1}
+1709024835.877938 [0] charge_act: config: Domain/General/MulticastTimeToLive/#text: 32 {}
+1709024835.877945 [0] charge_act: config: Domain/General/DontRoute/#text: false {}
+1709024835.877953 [0] charge_act: config: Domain/General/Transport/#text: udp {}
+1709024835.877959 [0] charge_act: config: Domain/General/EnableMulticastLoopback/#text: true {}
+1709024835.877968 [0] charge_act: config: Domain/General/MaxMessageSize/#text: 65500 B {1}
+1709024835.877975 [0] charge_act: config: Domain/General/MaxRexmitMessageSize/#text: 1456 B {}
+1709024835.877982 [0] charge_act: config: Domain/General/FragmentSize/#text: 1344 B {}
+1709024835.877989 [0] charge_act: config: Domain/General/RedundantNetworking/#text: false {}
+1709024835.877998 [0] charge_act: config: Domain/General/EntityAutoNaming/#text: empty {}
+1709024835.878010 [0] charge_act: config: Domain/General/EntityAutoNaming[@seed]: 4274271190 205688428 262075636 3994116680 2842964054 353314912 1697329291 3064028805 {}
+1709024835.878024 [0] charge_act: config: Domain/Sizing/ReceiveBufferSize/#text: 1 MiB {}
+1709024835.878034 [0] charge_act: config: Domain/Sizing/ReceiveBufferChunkSize/#text: 128 KiB {}
+1709024835.878045 [0] charge_act: config: Domain/Compatibility/StandardsConformance/#text: lax {}
+1709024835.878055 [0] charge_act: config: Domain/Compatibility/ExplicitlyPublishQosSetToDefault/#text: false {}
+1709024835.878064 [0] charge_act: config: Domain/Compatibility/ManySocketsMode/#text: single {}
+1709024835.878072 [0] charge_act: config: Domain/Compatibility/AssumeRtiHasPmdEndpoints/#text: false {}
+1709024835.878080 [0] charge_act: config: Domain/Discovery/Tag/#text:  {}
+1709024835.878089 [0] charge_act: config: Domain/Discovery/ExternalDomainId/#text: 0 {}
+1709024835.878099 [0] charge_act: config: Domain/Discovery/DSGracePeriod/#text: 30 s {}
+1709024835.878108 [0] charge_act: config: Domain/Discovery/ParticipantIndex/#text: none {}
+1709024835.878115 [0] charge_act: config: Domain/Discovery/MaxAutoParticipantIndex/#text: 9 {}
+1709024835.878122 [0] charge_act: config: Domain/Discovery/SPDPMulticastAddress/#text: 239.255.0.1 {}
+1709024835.878129 [0] charge_act: config: Domain/Discovery/SPDPInterval/#text: 30 s {}
+1709024835.878137 [0] charge_act: config: Domain/Discovery/DefaultMulticastAddress/#text: auto {}
+1709024835.878146 [0] charge_act: config: Domain/Discovery/Ports/Base/#text: 7400 {}
+1709024835.878155 [0] charge_act: config: Domain/Discovery/Ports/DomainGain/#text: 250 {}
+1709024835.878164 [0] charge_act: config: Domain/Discovery/Ports/ParticipantGain/#text: 2 {}
+1709024835.878173 [0] charge_act: config: Domain/Discovery/Ports/MulticastMetaOffset/#text: 0 {}
+1709024835.878181 [0] charge_act: config: Domain/Discovery/Ports/UnicastMetaOffset/#text: 10 {}
+1709024835.878189 [0] charge_act: config: Domain/Discovery/Ports/MulticastDataOffset/#text: 1 {}
+1709024835.878197 [0] charge_act: config: Domain/Discovery/Ports/UnicastDataOffset/#text: 11 {}
+1709024835.878215 [0] charge_act: config: Domain/Discovery/EnableTopicDiscoveryEndpoints/#text: false {}
+1709024835.878222 [0] charge_act: config: Domain/Discovery/LeaseDuration/#text: 10 s {}
+1709024835.878249 [0] charge_act: config: Domain/Tracing/Category/#text: fatal,error,warning,info,config {1}
+1709024835.878259 [0] charge_act: config: Domain/Tracing/OutputFile/#text: cyclonedds.log {}
+1709024835.878269 [0] charge_act: config: Domain/Tracing/AppendToFile/#text: false {}
+1709024835.878277 [0] charge_act: config: Domain/Tracing/PacketCaptureFile/#text:  {}
+1709024835.878285 [0] charge_act: config: Domain/Internal/DeliveryQueueMaxSamples/#text: 256 {}
+1709024835.878292 [0] charge_act: config: Domain/Internal/PrimaryReorderMaxSamples/#text: 128 {}
+1709024835.878300 [0] charge_act: config: Domain/Internal/SecondaryReorderMaxSamples/#text: 128 {}
+1709024835.878308 [0] charge_act: config: Domain/Internal/DefragUnreliableMaxSamples/#text: 4 {}
+1709024835.878316 [0] charge_act: config: Domain/Internal/DefragReliableMaxSamples/#text: 16 {}
+1709024835.878323 [0] charge_act: config: Domain/Internal/BuiltinEndpointSet/#text: writers {}
+1709024835.878330 [0] charge_act: config: Domain/Internal/MeasureHbToAckLatency/#text: false {}
+1709024835.878338 [0] charge_act: config: Domain/Internal/UnicastResponseToSPDPMessages/#text: true {}
+1709024835.878347 [0] charge_act: config: Domain/Internal/SynchronousDeliveryPriorityThreshold/#text: 0 {}
+1709024835.878355 [0] charge_act: config: Domain/Internal/SynchronousDeliveryLatencyBound/#text: inf {}
+1709024835.878363 [0] charge_act: config: Domain/Internal/MaxParticipants/#text: 0 {}
+1709024835.878371 [0] charge_act: config: Domain/Internal/AccelerateRexmitBlockSize/#text: 0 {}
+1709024835.878379 [0] charge_act: config: Domain/Internal/RetransmitMerging/#text: never {}
+1709024835.878387 [0] charge_act: config: Domain/Internal/RetransmitMergingPeriod/#text: 5 ms {}
+1709024835.878393 [0] charge_act: config: Domain/Internal/HeartbeatInterval/#text: 100 ms {}
+1709024835.878401 [0] charge_act: config: Domain/Internal/HeartbeatInterval[@min]: 5 ms {}
+1709024835.878408 [0] charge_act: config: Domain/Internal/HeartbeatInterval[@minsched]: 20 ms {}
+1709024835.878417 [0] charge_act: config: Domain/Internal/HeartbeatInterval[@max]: 8 s {}
+1709024835.878425 [0] charge_act: config: Domain/Internal/MaxQueuedRexmitBytes/#text: 512 KiB {}
+1709024835.878433 [0] charge_act: config: Domain/Internal/MaxQueuedRexmitMessages/#text: 200 {}
+1709024835.878440 [0] charge_act: config: Domain/Internal/WriterLingerDuration/#text: 1 s {}
+1709024835.878448 [0] charge_act: config: Domain/Internal/SocketReceiveBufferSize[@min]: default {}
+1709024835.878454 [0] charge_act: config: Domain/Internal/SocketReceiveBufferSize[@max]: default {}
+1709024835.878464 [0] charge_act: config: Domain/Internal/SocketSendBufferSize[@min]: 64 KiB {}
+1709024835.878471 [0] charge_act: config: Domain/Internal/SocketSendBufferSize[@max]: default {}
+1709024835.878479 [0] charge_act: config: Domain/Internal/NackDelay/#text: 100 ms {}
+1709024835.878486 [0] charge_act: config: Domain/Internal/AckDelay/#text: 10 ms {}
+1709024835.878494 [0] charge_act: config: Domain/Internal/AutoReschedNackDelay/#text: 3 s {}
+1709024835.878502 [0] charge_act: config: Domain/Internal/PreEmptiveAckDelay/#text: 10 ms {}
+1709024835.878509 [0] charge_act: config: Domain/Internal/ScheduleTimeRounding/#text: 0 s {}
+1709024835.878517 [0] charge_act: config: Domain/Internal/DDSI2DirectMaxThreads/#text: 1 {}
+1709024835.878525 [0] charge_act: config: Domain/Internal/SquashParticipants/#text: false {}
+1709024835.878533 [0] charge_act: config: Domain/Internal/SPDPResponseMaxDelay/#text: 0 s {}
+1709024835.878540 [0] charge_act: config: Domain/Internal/LateAckMode/#text: false {}
+1709024835.878548 [0] charge_act: config: Domain/Internal/RetryOnRejectBestEffort/#text: false {}
+1709024835.878555 [0] charge_act: config: Domain/Internal/GenerateKeyhash/#text: false {}
+1709024835.878563 [0] charge_act: config: Domain/Internal/MaxSampleSize/#text: 2147483647 B {}
+1709024835.878571 [0] charge_act: config: Domain/Internal/LivelinessMonitoring/#text: false {}
+1709024835.878588 [0] charge_act: config: Domain/Internal/LivelinessMonitoring[@StackTraces]: true {}
+1709024835.878597 [0] charge_act: config: Domain/Internal/LivelinessMonitoring[@Interval]: 1 s {}
+1709024835.878606 [0] charge_act: config: Domain/Internal/MonitorPort/#text: -1 {}
+1709024835.878615 [0] charge_act: config: Domain/Internal/PrioritizeRetransmit/#text: true {}
+1709024835.878623 [0] charge_act: config: Domain/Internal/UseMulticastIfMreqn/#text: 0 {}
+1709024835.878631 [0] charge_act: config: Domain/Internal/RediscoveryBlacklistDuration/#text: 0 s {}
+1709024835.878639 [0] charge_act: config: Domain/Internal/RediscoveryBlacklistDuration[@enforce]: false {}
+1709024835.878647 [0] charge_act: config: Domain/Internal/MultipleReceiveThreads/#text: default {}
+1709024835.878655 [0] charge_act: config: Domain/Internal/MultipleReceiveThreads[@maxretries]: 4294967295 {}
+1709024835.878666 [0] charge_act: config: Domain/Internal/Test/XmitLossiness/#text: 0 {}
+1709024835.878674 [0] charge_act: config: Domain/Internal/Watermarks/WhcLow/#text: 1 KiB {}
+1709024835.878684 [0] charge_act: config: Domain/Internal/Watermarks/WhcHigh/#text: 500 KiB {1}
+1709024835.878695 [0] charge_act: config: Domain/Internal/Watermarks/WhcHighInit/#text: 30 KiB {}
+1709024835.878705 [0] charge_act: config: Domain/Internal/Watermarks/WhcAdaptive/#text: true {}
+1709024835.878713 [0] charge_act: config: Domain/Internal/BurstSize/MaxRexmit/#text: 1 MiB {}
+1709024835.878722 [0] charge_act: config: Domain/Internal/BurstSize/MaxInitTransmit/#text: 4294967295 {}
+1709024835.878732 [0] charge_act: config: Domain/Internal/EnableExpensiveChecks/#text:  {}
+1709024835.878742 [0] charge_act: config: Domain/TCP/NoDelay/#text: true {}
+1709024835.878751 [0] charge_act: config: Domain/TCP/Port/#text: -1 {}
+1709024835.878761 [0] charge_act: config: Domain/TCP/ReadTimeout/#text: 2 s {}
+1709024835.878770 [0] charge_act: config: Domain/TCP/WriteTimeout/#text: 2 s {}
+1709024835.878780 [0] charge_act: config: Domain/TCP/AlwaysUsePeeraddrForUnicast/#text: false {}
+1709024835.878789 [0] charge_act: config: Domain/SSL/Enable/#text: false {}
+1709024835.878796 [0] charge_act: config: Domain/SSL/CertificateVerification/#text: true {}
+1709024835.878805 [0] charge_act: config: Domain/SSL/VerifyClient/#text: true {}
+1709024835.878814 [0] charge_act: config: Domain/SSL/SelfSignedCertificates/#text: false {}
+1709024835.878823 [0] charge_act: config: Domain/SSL/KeystoreFile/#text: keystore {}
+1709024835.878830 [0] charge_act: config: Domain/SSL/KeyPassphrase/#text: secret {}
+1709024835.878839 [0] charge_act: config: Domain/SSL/Ciphers/#text: ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH {}
+1709024835.878847 [0] charge_act: config: Domain/SSL/EntropyFile/#text:  {}
+1709024835.878856 [0] charge_act: config: Domain/SSL/MinimumTLSVersion/#text: 1.3 {}
+1709024835.878865 [0] charge_act: config: Domain/SharedMemory/Enable/#text: false {}
+1709024835.878874 [0] charge_act: config: Domain/SharedMemory/Locator/#text:  {}
+1709024835.878883 [0] charge_act: config: Domain/SharedMemory/Prefix/#text: DDS_CYCLONE {}
+1709024835.878894 [0] charge_act: config: Domain/SharedMemory/LogLevel/#text: info {}
+1709024835.878902 [0] charge_act: config: Domain[@Id]: 0 {1}
+1709024835.878965 [0] charge_act: started at 1709024835.06878933 -- 2024-02-27 09:07:15+00:00
+1709024835.878978 [0] charge_act: udp initialized
+1709024835.880614 [0] charge_act: interfaces: lo udp/127.0.0.1(q1) enp3s0 udp/192.168.0.11(q9) wlp2s0 wireless udp/192.168.1.211(q9) docker0 udp/172.17.0.1(q9) br-a03bcd7d4a18 udp/172.18.0.1(q9)
+1709024835.880668 [0] charge_act: selected interfaces: docker0 (index 4 priority 0)
+1709024835.880676 [0] charge_act: presumed robust multicast support, use for everything
+1709024835.880730 [0] charge_act: ownip: udp/172.17.0.1
+1709024835.880736 [0] charge_act: extmask: invalid/0 (not applicable)
+1709024835.880741 [0] charge_act: SPDP MC: udp/239.255.0.1
+1709024835.880747 [0] charge_act: default MC: udp/239.255.0.1
+1709024835.880751 [0] charge_act: SSM support included
+1709024835.881058 [0] charge_act: failed to increase socket receive buffer size to 1048576 bytes, continuing with 425984 bytes
+1709024835.881095 [0] charge_act: rtps_init: uc ports: disc 0 data 0
+1709024835.881101 [0] charge_act: rtps_init: domainid 0 participantid -2
+1709024835.881108 [0] charge_act: Unicast Ports: discovery 47587 data 47587
+1709024835.881124 [0] charge_act: failed to increase socket receive buffer size to 1048576 bytes, continuing with 425984 bytes
+1709024835.881178 [0] charge_act: failed to increase socket receive buffer size to 1048576 bytes, continuing with 425984 bytes
+1709024835.881221 [0] charge_act: Multicast Ports: discovery 7400 data 7401 
+1709024835.881250 [0] charge_act: failed to increase socket receive buffer size to 1048576 bytes, continuing with 425984 bytes
+1709024835.881270 [0] charge_act: interface docker0: transmit port 37367
+1709024838.880945 [0] charge_act: udp finalized
+1709024838.885200 [0] charge_act: Finis.
