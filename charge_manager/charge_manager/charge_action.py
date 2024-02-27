@@ -40,6 +40,7 @@ class ChargeAction(Node):
         self.bluetooth_setup = False
         self.bluetooth_reboot_requested = True
         self.charger_position_bool = False
+        self.bluetooth_state_stored = False
         
         self.msg_state_pub = Bool()
         self.msg_state_pub.data = False
@@ -112,6 +113,7 @@ class ChargeAction(Node):
         self.bluetooth_rebooting = False
         self.bluetooth_connected_time = 0.0
         self.bluetooth_node_stopped = True
+        self.bluetooth_state_stored = False
 
         # 蓝牙连接和dock对接状态控制,避免执行状态中再次重复发送goal
         self.dock_executing = False
@@ -237,10 +239,6 @@ class ChargeAction(Node):
         if restore or charge_type:
             self.dock_completed = True
             self.charger_position_bool = True
-        
-        with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
-            f.write('1\n')
-            f.write(self.mac)
 
         self.feedback_msg = Charge.Feedback()
         self.feedback_msg.state = ChargeActionState.idle
@@ -250,6 +248,11 @@ class ChargeAction(Node):
 
         while True:
             if self.dock_completed:
+                if not self.bluetooth_state_stored:
+                    self.bluetooth_state_stored = True
+                    with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
+                        f.write('1\n')
+                        f.write(self.mac)
                 if not self.charger_position_bool and not self.charger_state.has_contact:
                     time.sleep(1)
                     self.get_logger().info('stop /charge action...... ')
