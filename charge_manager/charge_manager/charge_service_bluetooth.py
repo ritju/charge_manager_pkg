@@ -19,6 +19,10 @@ from signal import SIGINT, SIGTERM
 
 from rclpy.callback_groups import ReentrantCallbackGroup
 
+from bleak.assigned_numbers import AdvertisementDataType
+from bleak.backends.bluezdbus.advertisement_monitor import OrPattern
+from bleak.backends.bluezdbus.scanner import BlueZScannerArgs
+
 
 # 需要实现的功能:
 # 1. 实时发布topic(间隔一秒或更短):(序列号,接触状态,充电状态,对接执行状态)
@@ -238,18 +242,18 @@ class BluetoothChargeServer(Node):
 
     # 连接充电桩蓝牙
     def connect_bluetooth(self,request, response):
-        self.get_logger().info("正在重启蓝牙...")
+        self.get_logger().info("正在重连蓝牙...")
         # print(os.system('sudo rfkill block bluetooth')) # bluetoothctl power off
-        blue_stop = subprocess.Popen(['sudo', 'rfkill', 'block', 'bluetooth'])
-        time.sleep(2)
-        self.terminate(blue_stop)
+        # blue_stop = subprocess.Popen(['sudo', 'rfkill', 'block', 'bluetooth'])
+        # time.sleep(2)
+        # self.terminate(blue_stop)
         self.charge_state.pid = ''
         self.charge_state.has_contact = False
         self.charge_state.is_charging = False
         # print(os.system('sudo rfkill unblock bluetooth')) # bluetoothctl power on
-        blue_start = subprocess.Popen(['sudo', 'rfkill', 'unblock', 'bluetooth'])
-        time.sleep(2)
-        self.terminate(blue_start)
+        # blue_start = subprocess.Popen(['sudo', 'rfkill', 'unblock', 'bluetooth'])
+        # time.sleep(2)
+        # self.terminate(blue_start)
         self.bluetooth_connected = None
         b_thread = threading.Thread(target=self.bluetooth_thread,kwargs={'mac_address':request.mac})
         b_thread.start()
@@ -280,7 +284,9 @@ class BluetoothChargeServer(Node):
     async def create_bleakclient(self,address):
         try:
             self.get_logger().info("搜索附近的蓝牙......")
-            devices = await BleakScanner().discover(return_adv=True)
+            args = BlueZScannerArgs(or_patterns=
+                                    [OrPattern(0, AdvertisementDataType.MANUFACTURER_SPECIFIC_DATA, b"\xe1\x02")])
+            devices = await BleakScanner(scanning_mode='passive', bluez=args).discover(return_adv=True)
             devices_num = len(devices)
             self.get_logger().info(f'共搜索到 {devices_num} 个蓝牙信号。')
             self.bluetooth_searched = False
@@ -290,7 +296,7 @@ class BluetoothChargeServer(Node):
                     self.get_logger().info(f'{key}   | {devices[key][1].local_name}')
                     if key == address:
                         self.bluetooth_searched = True
-                        ble_device = key
+                        self.ble_device = devices[key][0]
             if self.bluetooth_searched:
                 self.get_logger().info(f'搜索到mac: {address}')
             else:
@@ -299,7 +305,7 @@ class BluetoothChargeServer(Node):
                         
             self.uuid_write = None
             self.uuid_notify = None
-            self.bleak_client = BleakClient(address)
+            self.bleak_client = BleakClient(self.ble_device)
             await self.bleak_client.connect()
             self.disconnect_bluetooth = False
             # print('蓝牙连接成功')
