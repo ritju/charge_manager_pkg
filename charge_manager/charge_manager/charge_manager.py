@@ -94,25 +94,29 @@ class chargeManager(Node):
         # restore charge
         self.get_logger().info('restore charging or not ...')
         time.sleep(3)
-        with open('/map/charge_restore.txt', 'r', encoding='utf-8') as f:
-            restore = (int)(f.readline().strip('\n'))
-            self.get_logger().info(f'restore: {restore}')
-            self.get_logger().info(f"执行恢复充电")
-            if restore == 1:
-                self.get_logger().info('Need to restore charge behavior. ')
-                self.mac = f.readline().strip('\n')
-                if not self.charge_action_client.wait_for_server(5):
-                    self.get_logger().info('charge action server not on line. Failed to restore charge behavior')
+        try:
+            with open('/map/charge_restore.txt', 'r', encoding='utf-8') as f:
+                restore = (int)(f.readline().strip('\n'))
+                self.get_logger().info(f'restore: {restore}')
+                if restore == 1:
+                    self.get_logger().info(f"执行恢复充电")
+                    self.get_logger().info('Need to restore charge behavior. ')
+                    self.mac = f.readline().strip('\n')
+                    if not self.charge_action_client.wait_for_server(5):
+                        self.get_logger().info('charge action server not on line. Failed to restore charge behavior')
+                    else:
+                        self.get_logger().info('Starting restore charing behavior ...')
+                        self.get_logger().info(f'restore: {restore}, mac: {self.mac}')
+                        charge_msg = Charge.Goal()
+                        charge_msg.restore = restore
+                        charge_msg.mac = self.mac
+                        self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
+                        self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
                 else:
-                    self.get_logger().info('Starting restore charing behavior ...')
-                    self.get_logger().info(f'restore: {restore}, mac: {self.mac}')
-                    charge_msg = Charge.Goal()
-                    charge_msg.restore = restore
-                    charge_msg.mac = self.mac
-                    self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
-                    self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
-            else:
-                self.get_logger().info('Don\'t need to restore charge behavior.')
+                    self.get_logger().info('Don\'t need to restore charge behavior.')
+        except Exception as e:
+            self.get_logger().info(f'catch exception {str(e)}, when charge_manage node init.')
+
 
       
     def timer_pub_charger_state_callback(self):
@@ -151,6 +155,13 @@ class chargeManager(Node):
     def charger_start_docking_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start_docking service')
         self.get_logger().info("start charge action")
+        self.get_logger().info(f'Stop bluetooth node failed, write 1 to /map/core_restart.txt')
+        self.get_logger().info(f"write 1 to /map/core_start.txt for /charger/start_docking")
+        try:
+            with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                f.write('1\n')
+        except Exception as e:
+            self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charger/start_docking service.")
         self.charger_state.is_docking = True
         charge_msg = Charge.Goal()
         charge_msg.mac = self.mac
@@ -165,6 +176,12 @@ class chargeManager(Node):
         self.charger_state.is_docking = False
         self.get_logger().info('received a request for /charger/stop_docking service')
         self.get_logger().info("stop charge action")
+        self.get_logger().info(f"write 0 to /map/core_start.txt for /charger/stop_docking")
+        try:
+            with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                f.write('0\n')
+        except Exception as e:
+            self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/core_restart.txt for processing /charger/start_docking service.")
         if self.charge_action_client_sendgoal_future != None and isinstance(self.charge_action_client_sendgoal_future, Future):
             self.charge_goal_handle = self.charge_action_client_sendgoal_future.result()
             cancel_goal_future = self.charge_goal_handle.cancel_goal_async()
@@ -224,10 +241,15 @@ class chargeManager(Node):
             response.infos = "stop bluetooth node success."
             self.get_logger().info(f'{response.infos}')
         except Exception as e:
-            response.success = True
+            response.success = False
             response.infos = str(e)
             self.get_logger().info(f'when stop bluetooth, catch exception: {response.infos}')
-            self.get_logger().info()
+            self.get_logger().info(f'write 1 to /map/core_restart.txt for stopping bluetooth node failed.')
+            try:
+                with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                    f.write('1\n')
+            except Exception as e:
+                self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing stop bluetooth_node failed.")
         
         # don't kill child process success
         # self.bluetooth_proc.terminate()

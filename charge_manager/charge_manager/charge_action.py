@@ -41,6 +41,7 @@ class ChargeAction(Node):
         self.bluetooth_reboot_requested = True
         self.charger_position_bool = False
         self.bluetooth_state_stored = False
+        self.core_monitor_state_stored = False
         
         self.msg_state_pub = Bool()
         self.msg_state_pub.data = False
@@ -114,6 +115,7 @@ class ChargeAction(Node):
         self.bluetooth_connected_time = 0.0
         self.bluetooth_node_stopped = True
         self.bluetooth_state_stored = False
+        self.core_monitor_state_stored = False
 
         # 蓝牙连接和dock对接状态控制,避免执行状态中再次重复发送goal
         self.dock_executing = False
@@ -257,9 +259,23 @@ class ChargeAction(Node):
                             f.write(self.mac)
                     except Exception as e:
                         self.get_logger().info(f"存储充电状态 1 catch exception: {str(e)}")
+                if not self.core_monitor_state_stored: # Compatible with manual charging, do not delete!!!
+                    self.core_monitor_state_stored = True
+                    try:
+                        self.get_logger().info(f'write 1 to /map/core_restart.txt when /charge action started')
+                        with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                            f.write('1\n')
+                    except Exception as e:
+                        self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charge action started.")
                 if not self.charger_position_bool and not self.charger_state.has_contact:
                     time.sleep(1)
                     self.get_logger().info('stop /charge action...... ')
+                    self.get_logger().info(f"write 0 to /map/core_start.txt for stop /charge action")
+                    try:
+                        with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                            f.write('0\n')
+                    except Exception as e:
+                        self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/core_restart.txt for processing stop /charge action.")
                     result = Charge.Result()
                     result.success = True
                     self.goal_handle.succeed()

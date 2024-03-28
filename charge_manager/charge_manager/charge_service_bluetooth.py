@@ -22,6 +22,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from bleak.assigned_numbers import AdvertisementDataType
 from bleak.backends.bluezdbus.advertisement_monitor import OrPattern
 from bleak.backends.bluezdbus.scanner import BlueZScannerArgs
+from bleak.backends.device import BLEDevice
 
 
 # 需要实现的功能:
@@ -284,9 +285,10 @@ class BluetoothChargeServer(Node):
     async def create_bleakclient(self,address):
         try:
             self.get_logger().info("搜索附近的蓝牙......")
-            args = BlueZScannerArgs(or_patterns=
-                                    [OrPattern(0, AdvertisementDataType.MANUFACTURER_SPECIFIC_DATA, b"\xe1\x02")])
-            devices = await BleakScanner(scanning_mode='passive', bluez=args).discover(return_adv=True)
+            # args = BlueZScannerArgs(or_patterns=
+            #                         [OrPattern(0, AdvertisementDataType.MANUFACTURER_SPECIFIC_DATA, b"\xe1\x02")])
+            # devices = await BleakScanner(scanning_mode='passive', bluez=args).discover(return_adv=True)
+            devices = await BleakScanner(scanning_mode='active').discover(return_adv=True)
             devices_num = len(devices)
             self.get_logger().info(f'共搜索到 {devices_num} 个蓝牙信号。')
             self.bluetooth_searched = False
@@ -297,15 +299,44 @@ class BluetoothChargeServer(Node):
                     if key == address:
                         self.bluetooth_searched = True
                         self.ble_device = devices[key][0]
+                        
+            else:
+                 try:
+                    if 'marker_id_and_bluetooth_mac' in os.environ:
+                        marker_id_and_bluetooth_mac = [os.environ.get('marker_id_and_bluetooth_mac')]
+                        bluetooth_mac=marker_id_and_bluetooth_mac[0].split('/')[1]
+                        self.ble_device = BLEDevice(address=bluetooth_mac, name='ai-thinker')
+                 except:
+                    self.get_logger().info("Please input aruco marker_id and bluetooth_mac environment in docker-compose.yml file!")
+                    self.ble_device = BLEDevice(address='94:C9:60:43:C0:6D', name='ai-thinker')
+            
+            
             if self.bluetooth_searched:
                 self.get_logger().info(f'搜索到mac: {address}')
+                self.get_logger().info(f'address: {self.ble_device.address}, name: {self.ble_device.name}, details: {self.ble_device.details}, rssi: {self.ble_device.rssi}')
             else:
-                self.get_logger().info(f'未搜索到mac: {address}')               
+                # for test (not wroking yet)
+                self.get_logger().info(f'未搜索到mac: {address}')
+                try:
+                    self.get_logger().info(f'try to assign self.ble_device from docker-compose.yml file.')
+                    if 'marker_id_and_bluetooth_mac' in os.environ:
+                        marker_id_and_bluetooth_mac = [os.environ.get('marker_id_and_bluetooth_mac')]
+                        bluetooth_mac=marker_id_and_bluetooth_mac[0].split('/')[1]
+                        self.ble_device = BLEDevice(address=bluetooth_mac, name='ai-thinker')
+                    else:
+                        self.get_logger().info("Please input aruco marker_id and bluetooth_mac environment in docker-compose.yml file!")
+                        self.ble_device = BLEDevice(address='94:C9:60:43:BE:6A', name='ai-thinker', details='abc', rssi=100)
+                except Exception as e:
+                    self.get_logger().info(f"catch exception when assign self.ble_device: {str(e)}")
+                    self.ble_device = BLEDevice(address='94:C9:60:43:BE:6A', name='ai-thinker')
                 
                         
             self.uuid_write = None
             self.uuid_notify = None
-            self.bleak_client = BleakClient(self.ble_device)
+            if self.bluetooth_searched:
+                self.bleak_client = BleakClient(self.ble_device)
+            else:
+                self.bleak_client = BleakClient(address)
             await self.bleak_client.connect()
             self.disconnect_bluetooth = False
             # print('蓝牙连接成功')
