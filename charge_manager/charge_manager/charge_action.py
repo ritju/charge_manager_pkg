@@ -250,18 +250,26 @@ class ChargeAction(Node):
             if self.dock_completed:
                 if not self.bluetooth_state_stored:
                     self.bluetooth_state_stored = True
-                    with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
-                        f.write('1\n')
-                        f.write(self.mac)
+                    try:
+                        self.get_logger().info(f"存储充电状态 1 和 mac: {self.mac} 到/map/charge_restore.txt.")
+                        with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
+                            f.write('1\n')
+                            f.write(self.mac)
+                    except Exception as e:
+                        self.get_logger().info(f"存储充电状态 1 catch exception: {str(e)}")
                 if not self.charger_position_bool and not self.charger_state.has_contact:
                     time.sleep(1)
                     self.get_logger().info('stop /charge action...... ')
                     result = Charge.Result()
                     result.success = True
                     self.goal_handle.succeed()
-                    with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
-                        f.write('0\n')
-                        f.write(self.mac)
+                    try:
+                        self.get_logger().info(f'存储充电状态 0 和 mac: {self.mac} 到/map/charge_restore.txt.')
+                        with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
+                            f.write('0\n')
+                            f.write(self.mac)
+                    except Exception as e:
+                        self.get_logger().info(f'存储充电状态 0 catch exception: {str(e)}')
                     self.msg_state_pub.data = False
                     return result
                 else:                    

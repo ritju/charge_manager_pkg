@@ -97,6 +97,7 @@ class chargeManager(Node):
         with open('/map/charge_restore.txt', 'r', encoding='utf-8') as f:
             restore = (int)(f.readline().strip('\n'))
             self.get_logger().info(f'restore: {restore}')
+            self.get_logger().info(f"执行恢复充电")
             if restore == 1:
                 self.get_logger().info('Need to restore charge behavior. ')
                 self.mac = f.readline().strip('\n')
@@ -225,7 +226,8 @@ class chargeManager(Node):
         except Exception as e:
             response.success = True
             response.infos = str(e)
-            self.get_logger().info(f'{response.infos}')
+            self.get_logger().info(f'when stop bluetooth, catch exception: {response.infos}')
+            self.get_logger().info()
         
         # don't kill child process success
         # self.bluetooth_proc.terminate()
@@ -247,7 +249,7 @@ class chargeManager(Node):
         for child in parent.children(recursive=True):  # or parent.children() for recursive=False
             self.get_logger().info(f'child_{index}\'s children num: {len(child.children(recursive=True))}')
             self.get_logger().info(f'Terminating child {index}, pid: {child.pid}, name: {child.name()} ......')
-            child.terminate()
+            child.send_signal(SIGINT)
             rt_code = child.wait(5)
             if rt_code == None:
                 self.get_logger().info(f'Terminate child {index} (pid: {child.pid}) failed.(need fixed.)')
@@ -259,7 +261,7 @@ class chargeManager(Node):
             index += 1
 
         parent.send_signal(SIGINT)
-        rt_code = parent.wait(5)
+        rt_code = parent.wait(6)
         if rt_code == None:
                 self.get_logger().info(f'Terminate parent (pid: {parent.pid}) failed.')
         else:
