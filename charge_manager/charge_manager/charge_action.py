@@ -244,6 +244,15 @@ class ChargeAction(Node):
 
         self.feedback_msg = Charge.Feedback()
         self.feedback_msg.state = ChargeActionState.idle
+
+        if not self.core_monitor_state_stored: # Compatible with manual charging, do not delete!!!
+            self.core_monitor_state_stored = True
+            try:
+                self.get_logger().info(f'write 1 to /map/core_restart.txt when /charge action started')
+                with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                    f.write('1\n')
+            except Exception as e:
+                self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charge action started.")
         
         self.loop_thread = threading.Thread(target=self.loop_,daemon=True)
         self.loop_thread.start()
@@ -259,14 +268,7 @@ class ChargeAction(Node):
                             f.write(self.mac)
                     except Exception as e:
                         self.get_logger().info(f"存储充电状态 1 catch exception: {str(e)}")
-                if not self.core_monitor_state_stored: # Compatible with manual charging, do not delete!!!
-                    self.core_monitor_state_stored = True
-                    try:
-                        self.get_logger().info(f'write 1 to /map/core_restart.txt when /charge action started')
-                        with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
-                            f.write('1\n')
-                    except Exception as e:
-                        self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charge action started.")
+                
                 if not self.charger_position_bool and not self.charger_state.has_contact:
                     time.sleep(1)
                     self.get_logger().info('stop /charge action...... ')
