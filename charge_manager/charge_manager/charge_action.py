@@ -20,6 +20,7 @@ from capella_ros_service_interfaces.msg import ChargeState
 from std_srvs.srv import Empty as EmptyForSrv
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
+from capella_ros_msg.msg import Velocities
 
 class ChargeActionState():
     idle = 'idle'
@@ -79,6 +80,9 @@ class ChargeAction(Node):
         charger_state_qos.history = HistoryPolicy.KEEP_LAST
         charger_state_qos.durability = DurabilityPolicy.VOLATILE
         self.charger_state_sub = self.create_subscription(ChargeState, '/charger/state', self.charger_state_sub_callback, charger_state_qos, callback_group=self.cb_group)
+
+        # sub for /raw_vel ； 如果机器人充电状态下，轮子检测到速度就停止充电状态
+        self.raw_vel_sub = self.create_subscription(Velocities, 'raw_vel', self.raw_vel_sub_callback, 5, callback_group=self.cb_group)
 
         # pub for /is_docking_state
         self.is_docking_state_pub = self.create_publisher(Bool, 'is_docking_state', 1, callback_group=self.cb_group)
@@ -148,6 +152,18 @@ class ChargeAction(Node):
 
     def charger_position_bool_sub_callback(self, msg):
         self.charger_position_bool = msg.data
+    
+    def raw_vel_sub_callback(self, msg):
+        if not self.stop_loop and self.dock_completed:
+            linear_x = abs(msg.linear_x)
+            angular_z = abs(msg.angular_z)
+            if linear_x > 0.1 or angular_z > 0.1:
+                self.get_logger().info(f'检测到/raw_vel topic linear_x: {linear_x}, angular_z: {angular_z}, 停止充电。')
+                self.stop_loop = True
+            else:
+                pass
+        else:
+            pass
 
     def timer_loop_callback(self):
         if not self.bluetooth_setup and self.bluetooth_reboot_requested and self.bluetooth_node_stopped:
@@ -269,7 +285,7 @@ class ChargeAction(Node):
                     except Exception as e:
                         self.get_logger().info(f"存储充电状态 1 catch exception: {str(e)}")
                 
-                if not self.charger_position_bool and not self.charger_state.has_contact:
+                if (not self.charger_position_bool and not self.charger_state.has_contact) or self.stop_loop:
                     time.sleep(1)
                     self.get_logger().info('stop /charge action...... ')
                     self.get_logger().info(f"write 0 to /map/core_start.txt for stop /charge action")
