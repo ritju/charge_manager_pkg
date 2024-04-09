@@ -301,14 +301,15 @@ class BluetoothChargeServer(Node):
                         self.ble_device = devices[key][0]
                         
             else:
-                 try:
-                    if 'marker_id_and_bluetooth_mac' in os.environ:
-                        marker_id_and_bluetooth_mac = [os.environ.get('marker_id_and_bluetooth_mac')]
-                        bluetooth_mac=marker_id_and_bluetooth_mac[0].split('/')[1]
-                        self.ble_device = BLEDevice(address=bluetooth_mac, name='ai-thinker')
-                 except:
-                    self.get_logger().info("Please input aruco marker_id and bluetooth_mac environment in docker-compose.yml file!")
-                    self.ble_device = BLEDevice(address='94:C9:60:43:C0:6D', name='ai-thinker')
+                #  try:
+                #     if 'marker_id_and_bluetooth_mac' in os.environ:
+                #         marker_id_and_bluetooth_mac = [os.environ.get('marker_id_and_bluetooth_mac')]
+                #         bluetooth_mac=marker_id_and_bluetooth_mac[0].split('/')[1]
+                #         self.ble_device = BLEDevice(address=bluetooth_mac, name='ai-thinker')
+                #  except:
+                #     self.get_logger().info("Please input aruco marker_id and bluetooth_mac environment in docker-compose.yml file!")
+                #     self.ble_device = BLEDevice(address='94:C9:60:43:C0:6D', name='ai-thinker')
+                pass
             
             
             if self.bluetooth_searched:
@@ -317,18 +318,18 @@ class BluetoothChargeServer(Node):
             else:
                 # for test (not wroking yet)
                 self.get_logger().info(f'未搜索到mac: {address}')
-                try:
-                    self.get_logger().info(f'try to assign self.ble_device from docker-compose.yml file.')
-                    if 'marker_id_and_bluetooth_mac' in os.environ:
-                        marker_id_and_bluetooth_mac = [os.environ.get('marker_id_and_bluetooth_mac')]
-                        bluetooth_mac=marker_id_and_bluetooth_mac[0].split('/')[1]
-                        self.ble_device = BLEDevice(address=bluetooth_mac, name='ai-thinker')
-                    else:
-                        self.get_logger().info("Please input aruco marker_id and bluetooth_mac environment in docker-compose.yml file!")
-                        self.ble_device = BLEDevice(address='94:C9:60:43:BE:6A', name='ai-thinker', details='abc', rssi=100)
-                except Exception as e:
-                    self.get_logger().info(f"catch exception when assign self.ble_device: {str(e)}")
-                    self.ble_device = BLEDevice(address='94:C9:60:43:BE:6A', name='ai-thinker')
+                # try:
+                #     self.get_logger().info(f'try to assign self.ble_device from docker-compose.yml file.')
+                #     if 'marker_id_and_bluetooth_mac' in os.environ:
+                #         marker_id_and_bluetooth_mac = [os.environ.get('marker_id_and_bluetooth_mac')]
+                #         bluetooth_mac=marker_id_and_bluetooth_mac[0].split('/')[1]
+                #         self.ble_device = BLEDevice(address=bluetooth_mac, name='ai-thinker')
+                #     else:
+                #         self.get_logger().info("Please input aruco marker_id and bluetooth_mac environment in docker-compose.yml file!")
+                #         self.ble_device = BLEDevice(address='94:C9:60:43:BE:6A', name='ai-thinker', details='abc', rssi=100)
+                # except Exception as e:
+                #     self.get_logger().info(f"catch exception when assign self.ble_device: {str(e)}")
+                #     self.ble_device = BLEDevice(address='94:C9:60:43:BE:6A', name='ai-thinker')
                 
                         
             self.uuid_write = None
