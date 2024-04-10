@@ -7,17 +7,23 @@ from rclpy.parameter import Parameter
 import numpy as np
 import cv2
 import time
+import rclpy.node
+import rclpy.time
+from rclpy.clock import Clock
 
 
-class Video_Control_Speed(object):
+class Video_Control_Speed(rclpy.node.Node):
         def __init__(self,publish_frequency = 100):
-                # super().__init__(node_name)
+                super().__init__('test_dance')
                 self.speed_list = []
                 self.publish_frequency = publish_frequency/1000 # ms
                 self.node = Node('vedio_control_speed')
                 self.publisher = self.node.create_publisher(Twist,"/cmd_vel",100)
                 self.rate = self.node.create_rate(1/self.publish_frequency)
                 print('发布频率：',1/self.publish_frequency)
+
+                self.declare_parameter('run_time','2024-04-10 08:50:00')
+                self.run_time = self.get_parameter('run_time').get_parameter_value().string_value
 
 
         def left_rotate(self,time,angle):
@@ -85,6 +91,25 @@ def main(args=None):
         node.wait(0.3)
         node.backward(1, -0.3)
         print(node.speed_list)
+        while True:
+                now_time = Clock().now()
+                now_time_stamp_sec = now_time.to_msg().sec
+                print(f'now_time_stamp_sec: {now_time_stamp_sec}')
+                print(f'run_time: {node.run_time}')
+                s_t = time.strptime(node.run_time, "%Y-%m-%d %H:%M:%S")  # 返回元祖
+                mkt = int(time.mktime(s_t))
+                print(f'run_time_stamp_sec: {mkt}')
+                if now_time_stamp_sec < mkt:
+                        print('waiting ......')
+                elif now_time_stamp_sec > mkt:
+                        print('exceeded running time, exit.')
+                        break
+                elif now_time_stamp_sec == mkt:
+                        print('start running ......')
+                        break
+                time.sleep(0.1)
+        
+
         node.run()
 
         # video = cv2.VideoCapture('/workspaces/capella_ros_docker/src/video_control_speed/video_control_speed/video_control_speed_node.py')
