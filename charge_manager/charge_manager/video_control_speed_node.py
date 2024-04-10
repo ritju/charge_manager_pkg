@@ -106,11 +106,12 @@ def main(args=None):
                         break
                 elif now_time_stamp_sec == mkt:
                         print('start running ......')
+                        node.run()
                         break
                 time.sleep(0.1)
         
 
-        node.run()
+        
 
         # video = cv2.VideoCapture('/workspaces/capella_ros_docker/src/video_control_speed/video_control_speed/video_control_speed_node.py')
         # while video.isOpened():
