@@ -85,15 +85,15 @@ def main(args=None):
         
         for i in range(node.loop_time):
                 node.wait(0.5)
-                node.forward(3,0.3)
+                node.forward(2,0.8)
                 node.wait(0.3)
-                node.left_rotate(2.5, 90)
+                node.left_rotate(1, 180)
                 node.wait(0.3)
-                node.right_rotate(5, -180)
+                node.right_rotate(1, -180)
                 node.wait(0.3)
-                node.left_rotate(2.5, 90)
+                node.left_rotate(2, 360)
                 node.wait(0.3)
-                node.backward(3, -0.3)
+                node.backward(2, -0.8)
 
 
         print(node.speed_list)
