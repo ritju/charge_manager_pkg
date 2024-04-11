@@ -22,8 +22,10 @@ class Video_Control_Speed(rclpy.node.Node):
                 self.rate = self.node.create_rate(1/self.publish_frequency)
                 print('发布频率：',1/self.publish_frequency)
 
-                self.declare_parameter('run_time','2024-04-10 08:50:00')
+                self.declare_parameter('run_time', '2024-04-10 08:50:00')
+                self.declare_parameter('loop_time', 1)
                 self.run_time = self.get_parameter('run_time').get_parameter_value().string_value
+                self.loop_time = self.get_parameter('loop_time').get_parameter_value().integer_value
 
 
         def left_rotate(self,time,angle):
@@ -80,16 +82,20 @@ class Video_Control_Speed(rclpy.node.Node):
 def main(args=None):
         rclpy.init(args=args)
         node = Video_Control_Speed()#'vedio_control_speed'
-        node.wait(1)
-        node.forward(1,0.3)
-        node.wait(0.3)
-        node.left_rotate(5, 90)
-        node.wait(0.3)
-        node.right_rotate(10, -180)
-        node.wait(0.3)
-        node.left_rotate(5, 90)
-        node.wait(0.3)
-        node.backward(1, -0.3)
+        
+        for i in range(node.loop_time):
+                node.wait(0.5)
+                node.forward(3,0.3)
+                node.wait(0.3)
+                node.left_rotate(2.5, 90)
+                node.wait(0.3)
+                node.right_rotate(5, -180)
+                node.wait(0.3)
+                node.left_rotate(2.5, 90)
+                node.wait(0.3)
+                node.backward(3, -0.3)
+
+
         print(node.speed_list)
         while True:
                 now_time = Clock().now()
