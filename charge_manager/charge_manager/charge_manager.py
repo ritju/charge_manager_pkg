@@ -155,7 +155,6 @@ class chargeManager(Node):
     def charger_start_docking_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start_docking service')
         self.get_logger().info("start charge action")
-        self.get_logger().info(f'Stop bluetooth node failed, write 1 to /map/core_restart.txt')
         self.get_logger().info(f"write 1 to /map/core_start.txt for /charger/start_docking")
         try:
             with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:

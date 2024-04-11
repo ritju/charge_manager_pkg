@@ -358,7 +358,7 @@ class ChargeAction(Node):
             self.bluetooth_connect_num = 0
             self.bluetooth_reboot_requested = True
             self.bluetooth_rebooting = True
-            self.bluetooth_setup = False
+            # self.bluetooth_setup = False #fix bug when start_bluetooth failed or catch exception.
             # self.get_logger().info(f'bluetooth_connect_num is {num_old} >= {self.bluetooth_connect_num_max}, reboot bluetooth server node')
             self.get_logger().info('-------- call /bluetooth/stop service --------')
             self.bluetooth_stop_future = self.bluetooth_stop_client_.call_async(StopBluetooth.Request())
@@ -395,21 +395,25 @@ class ChargeAction(Node):
     def bluetooth_stop_future_done_callback(self, future):
         response = future.result()
         if response.success:
+            self.get_logger().info('bluetooth/stop service result: success.')
             self.get_logger().info(f'infos: {response.infos}')
             self.bluetooth_setup = False
             self.bluetooth_node_stopped = True
         else:
+            self.get_logger().info('bluetooth/stop service result: failed.')
             self.get_logger().warn(f'infos: {response.infos}')
 
 
     def bluetooth_start_future_done_callback(self, future):
         response = future.result()
         if response.success:
+            self.get_logger().info('bluetooth/start service result: success.')
             self.get_logger().info(f'infos: {response.infos}')
             self.bluetooth_setup = True
             self.bluetooth_node_stopped = False
             self.bluetooth_rebooting = False
         else:
+            self.get_logger().info('bluetooth/start service result: failed.')
             self.get_logger().warn(f'infos: {response.infos}')
             self.bluetooth_rebooting = False
 
