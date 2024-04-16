@@ -234,9 +234,19 @@ class ChargeAction(Node):
         
 
     # charge_action goal_callback
-    def charge_action_goal_callback(self, goal_request):        
+    def charge_action_goal_callback(self, goal_request):
+        charge_type = ''
+        if goal_request.restore == 1:
+            charge_type = 'restore'
+        else:
+            if goal_request.type == 0:
+                charge_type = 'auto'
+            elif goal_request.type == 1:
+                charge_type = 'manual'
+        
+        self.get_logger().info(f'Received a new /Charge action request, type: {charge_type}')
         if self.msg_state_pub.data:
-            self.get_logger().info('Received new Charge Action when executing Charge action. Reject')
+            self.get_logger().info('The /charge action server is executing Charge action. Reject')
             return GoalResponse.REJECT
         else:
             self.mac = goal_request.mac
@@ -245,7 +255,7 @@ class ChargeAction(Node):
             self.get_logger().info('charge_action_goal_callback')
             self.get_logger().info(f'self.mac: {self.mac}')
             self.msg_state_pub.data = True            
-            self.get_logger().info('Received a Charge Action, accepted and executing.')
+            self.get_logger().info('The /charge action server is idle, accepted and executing.')
             return GoalResponse.ACCEPT
 
     # charge_action handle_accepted_callback
