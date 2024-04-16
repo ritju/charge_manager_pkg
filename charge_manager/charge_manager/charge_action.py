@@ -43,14 +43,13 @@ class ChargeAction(Node):
         self.charger_position_bool = False
         self.bluetooth_state_stored = False
         self.core_monitor_state_stored = False
+        self.bluetooth_node_stopped = True
         
         self.msg_state_pub = Bool()
         self.msg_state_pub.data = False
 
         # 定义 callback_group 类型
         self.cb_group = ReentrantCallbackGroup()
-
-        self.init_params() 
 
         # 初始化 zero_cmd_vel_publisher
         self.zero_cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 1, callback_group=self.cb_group)
@@ -109,6 +108,8 @@ class ChargeAction(Node):
                                                   handle_accepted_callback=self.charge_action_handle_accepted_callback,
                                                   cancel_callback=self.charge_action_cancel_callback,
                                                   )
+
+        self.init_params() 
         
     def init_params(self):        
         # 初始化蓝牙相关参数
@@ -117,7 +118,13 @@ class ChargeAction(Node):
         self.future_connect_bluetooth = None
         self.bluetooth_rebooting = False
         self.bluetooth_connected_time = 0.0
-        self.bluetooth_node_stopped = True
+        # self.bluetooth_node_stopped = True # fix bug for stopping bluetooth failed(request bluetooth/start before bluetooth/stop completed.)
+        if self.connect_bluetooth_client_.wait_for_service(2):
+            self.bluetooth_node_stopped = False
+            self.get_logger().info('bluetooth server is on line')
+        else:
+            self.bluetooth_node_stopped = True
+            self.get_logger().info('bluetooth server is off line')
         self.bluetooth_state_stored = False
         self.core_monitor_state_stored = False
 
@@ -184,7 +191,7 @@ class ChargeAction(Node):
                 
         # self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=10)
         if self.bluetooth_setup:
-            if not self.bluetooth_connected and  not self.connect_bluetooth_executing :
+            if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.bluetooth_rebooting: # do not connect bluetooth when rebooting bluetooth server
                 self.connect_bluetooth_executing = True
                 self.get_logger().info(f"-------- call /connect_bluetooth service, {self.bluetooth_connect_num + 1} / {self.bluetooth_connect_num_max} --------")
                 request = ConnectBluetooth.Request()
@@ -358,7 +365,7 @@ class ChargeAction(Node):
             self.bluetooth_connect_num = 0
             self.bluetooth_reboot_requested = True
             self.bluetooth_rebooting = True
-            # self.bluetooth_setup = False #fix bug when start_bluetooth failed or catch exception.
+            # self.bluetooth_setup = False #fix bug for stopping bluetooth failed(request bluetooth/start before bluetooth/stop completed.)
             # self.get_logger().info(f'bluetooth_connect_num is {num_old} >= {self.bluetooth_connect_num_max}, reboot bluetooth server node')
             self.get_logger().info('-------- call /bluetooth/stop service --------')
             self.bluetooth_stop_future = self.bluetooth_stop_client_.call_async(StopBluetooth.Request())

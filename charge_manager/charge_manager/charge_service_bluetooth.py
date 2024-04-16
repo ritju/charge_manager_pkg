@@ -147,7 +147,7 @@ class BluetoothChargeServer(Node):
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
             self.charge_state_publisher.publish(self.charge_state)
-            if time.time() - self.heartbeat_time > 20 and self.bluetooth_connected != None and self.heartbeat_time != 0:
+            if time.time() - self.heartbeat_time > 20 and self.bluetooth_connected != None and self.heartbeat_time != 0 and self.charge_state.pid == '':
                 self.get_logger().info("No data received more than 20 seconds.")
                 self.get_logger().info(f"current_time: {time.time()}")
                 self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
@@ -244,6 +244,8 @@ class BluetoothChargeServer(Node):
     # 连接充电桩蓝牙
     def connect_bluetooth(self,request, response):
         self.get_logger().info("正在重连蓝牙...")
+        self.connect_start_time = time.time()
+        self.connect_exception = ""
         # print(os.system('sudo rfkill block bluetooth')) # bluetoothctl power off
         # blue_stop = subprocess.Popen(['sudo', 'rfkill', 'block', 'bluetooth'])
         # time.sleep(2)
@@ -276,9 +278,13 @@ class BluetoothChargeServer(Node):
         if self.bluetooth_connected == True:
             self.get_logger().info('蓝牙连接成功.')
             response.success = True
+            response.connection_time = round(time.time() - self.connect_start_time, 1)
+            response.result = f"蓝牙连接成功 {self.connect_exception}"
         else:
             self.get_logger().info('蓝牙连接失败.')
             response.success = False
+            response.connection_time = round(time.time() - self.connect_start_time, 1)
+            response.result = f"蓝牙连接失败  {self.connect_exception}"
         return response
 
     # 创建bleak客户端
@@ -314,7 +320,10 @@ class BluetoothChargeServer(Node):
             
             if self.bluetooth_searched:
                 self.get_logger().info(f'搜索到mac: {address}')
-                self.get_logger().info(f'address: {self.ble_device.address}, name: {self.ble_device.name}, details: {self.ble_device.details}, rssi: {self.ble_device.rssi}')
+                self.get_logger().info(f'address: {self.ble_device.address}')
+                self.get_logger().info(f'name: {self.ble_device.name}')
+                self.get_logger().info(f'details: {self.ble_device.details}')
+                self.get_logger().info(f'rssi: {devices[address][1].rssi}')
             else:
                 # for test (not wroking yet)
                 self.get_logger().info(f'未搜索到mac: {address}')
@@ -410,6 +419,7 @@ class BluetoothChargeServer(Node):
             self.charge_state.pid = ""
             self.get_logger().info('catch exception ......')
             self.get_logger().info(f'exception: {str(e)}')
+            self.connect_exception = str(e)
             time.sleep(2)
         
     def bluetooth_thread(self,mac_address):
