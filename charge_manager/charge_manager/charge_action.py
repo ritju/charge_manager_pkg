@@ -11,8 +11,9 @@ from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolic
 
 import time
 import threading
+import signal
 
-from charge_manager_msgs.srv import ConnectBluetooth, StartBluetooth, StopBluetooth
+from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth, StartBluetooth, StopBluetooth
 from charge_manager_msgs.action import Charge
 from capella_ros_dock_msgs.action import Dock
 from capella_ros_msg.msg import Battery
@@ -22,10 +23,16 @@ from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 from capella_ros_msg.msg import Velocities
 
+sigint_received = 0
+
 class ChargeActionState():
     idle = 'idle'
+    stop_bluetooth_node = 'stop_bluetooth_node'
+    start_bluetooth_node = 'start_bluetooth_node'
     connectbluetooth = 'connecting_bluetooth'
+    disconnectbluetooth = 'disconnectbluetooth'
     docking = 'docking'
+    start_charging = 'start_charging'
     charging = 'charging'
 
 # "94:C9:60:43:BE:FD"
@@ -88,6 +95,9 @@ class ChargeAction(Node):
         
         # 创建连接蓝牙的客户端
         self.connect_bluetooth_client_ = self.create_client(ConnectBluetooth, 'connect_bluetooth',callback_group=self.cb_group)
+
+        # 创建断开蓝牙连接的客户端
+        self.disconnect_bluetooth_client_ = self.create_client(DisconnectBluetooth, 'disconnect_bluetooth', callback_group=self.cb_group)
         
         # 创建对接充电桩的客户端
         self.dock_client_ = ActionClient(self, Dock, "dock", callback_group=self.cb_group)
@@ -109,6 +119,8 @@ class ChargeAction(Node):
                                                   cancel_callback=self.charge_action_cancel_callback,
                                                   )
 
+        self.charge_type = ''
+        self.goal_handle = None
         self.init_params() 
         
     def init_params(self):        
@@ -116,6 +128,7 @@ class ChargeAction(Node):
         self.mac = ''
         self.bluetooth_connected = False
         self.future_connect_bluetooth = None
+        self.future_disconnect_bluetooth = None
         self.bluetooth_rebooting = False
         self.bluetooth_connected_time = 0.0
         # self.bluetooth_node_stopped = True # fix bug for stopping bluetooth failed(request bluetooth/start before bluetooth/stop completed.)
@@ -235,16 +248,15 @@ class ChargeAction(Node):
 
     # charge_action goal_callback
     def charge_action_goal_callback(self, goal_request):
-        charge_type = ''
         if goal_request.restore == 1:
-            charge_type = 'restore'
+            self.charge_type = 'restore'
         else:
             if goal_request.type == 0:
-                charge_type = 'auto'
+                self.charge_type = 'auto'
             elif goal_request.type == 1:
-                charge_type = 'manual'
+                self.charge_type = 'manual'
         
-        self.get_logger().info(f'Received a new /Charge action request, type: {charge_type}')
+        self.get_logger().info(f'Received a new /Charge action request, type: {self.charge_type}')
         if self.msg_state_pub.data:
             self.get_logger().info('The /charge action server is executing Charge action. Reject')
             return GoalResponse.REJECT
@@ -269,9 +281,9 @@ class ChargeAction(Node):
         self.get_logger().info("charge_action_execute_callback.")
         self.init_params()
         self.mac = goal_handle.request.mac
-        restore = goal_handle.request.restore
-        charge_type = goal_handle.request.type
-        if restore or charge_type:
+        re_restore = goal_handle.request.restore
+        re_charge_type = goal_handle.request.type
+        if re_restore or re_charge_type:
             self.dock_completed = True
             self.charger_position_bool = True
 
@@ -284,6 +296,7 @@ class ChargeAction(Node):
                 self.get_logger().info(f'write 1 to /map/core_restart.txt when /charge action started')
                 with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
                     f.write('1\n')
+                    f.write(self.mac)
             except Exception as e:
                 self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charge action started.")
         
@@ -291,6 +304,10 @@ class ChargeAction(Node):
         self.loop_thread.start()
 
         while True:
+            if self.goal_handle and sigint_received:
+                self.get_logger().info(f'received a SIGINT signal when executing /charge action, aborting ......')
+                self.goal_handle.abort()
+
             if self.dock_completed:
                 if not self.bluetooth_state_stored:
                     self.bluetooth_state_stored = True
@@ -304,8 +321,11 @@ class ChargeAction(Node):
                 
                 if (not self.charger_position_bool and not self.charger_state.has_contact) or self.stop_loop:
                     time.sleep(1)
-                    self.get_logger().info('stop /charge action...... ')
-                    self.get_logger().info(f"write 0 to /map/core_start.txt for stop /charge action")
+                    self.get_logger().info(f'charger_position_bool: {"True" if self.charger_position_bool else "False"}')
+                    self.get_logger().info(f'charger_state.has_contact: {"True" if self.charger_state.has_contact else "False"}')
+                    self.get_logger().info(f'stop_loop: {"True" if self.stop_loop else "False"}')
+                    self.get_logger().info(f'stop /charge action, type: {self.charge_type} ...... ')
+                    self.get_logger().info(f"write 0 to /map/core_start.txt for stop charge action")
                     try:
                         with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
                             f.write('0\n')
@@ -434,13 +454,20 @@ class ChargeAction(Node):
             self.get_logger().warn(f'infos: {response.infos}')
             self.bluetooth_rebooting = False
 
+def sigint_handle(signal, frame):
+    sigint_received = 1
+    print('************ received a SIGINT signal ************')
 
 def main(args=None):
     rclpy.init(args=args)
     charge_action_node = ChargeAction()
+    signal.signal(signal.SIGINT, sigint_handle)
     multi_executor = MultiThreadedExecutor()
     multi_executor.add_node(charge_action_node)
     multi_executor.spin()
+    # while not sigint_received:
+    #     multi_executor.spin_once()
+    # time.sleep(5)
     rclpy.shutdown()
 
 if __name__ == '__main__':

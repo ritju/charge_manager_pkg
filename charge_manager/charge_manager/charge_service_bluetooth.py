@@ -4,7 +4,7 @@ import time
 import os
 import threading
 import crcmod.predefined
-from charge_manager_msgs.srv import ConnectBluetooth
+from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth
 from charge_manager_msgs.msg import ChargeState2
 from std_msgs.msg import Int8
 from rclpy.action import ActionClient
@@ -78,6 +78,8 @@ class BluetoothChargeServer(Node):
         self.disconnect_bluetooth = False
         # 通过bssid链接充电桩WIFI服务
         self.bluetooth_concact_server = self.create_service(ConnectBluetooth, '/connect_bluetooth', self.connect_bluetooth)
+        # 断开蓝牙服务
+        self.bluetooth_disconnect_server = self.create_service(DisconnectBluetooth, '/disconnect_bluetooth', self.disconnect_bluetooth_callback)
         # # 话题和订阅器的qos
         charger_state_qos = QoSProfile(depth=1)
         charger_state_qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -101,6 +103,27 @@ class BluetoothChargeServer(Node):
 
         self.get_logger().info("Bluetooth charge Server starting")
 
+    def disconnect_bluetooth_callback(self, request, response):
+         start_time = time.time()
+         self.get_logger().info('received a request for /disconnect_bluetooth')
+         self.disconnect_bluetooth = True
+         response.success = True
+         response.infos = '断开蓝牙连接服务响应成功。'
+         while self.charge_state.pid != '':
+            if time.time() - start_time > 10.0:
+                response.success = False
+                response.infos = '断开蓝牙连接服务响应超时（10s）。'
+                break
+            else:
+                self.get_logger().info('等待蓝牙连接服务断开中......', throttle_duration_sec=1)
+                time.sleep(0.1)
+         if self.charge_state.pid == '':
+              self.heartbeat_time = 0
+              self.get_logger().info('断开蓝牙连接服务响应成功。')
+         response.cost_time = round(time.time() - start_time, 1)
+         return response
+        
+    
     def terminate(self, proc: subprocess.Popen):
         parent_pid = proc.pid 
         parent = psutil.Process(parent_pid)
@@ -147,13 +170,14 @@ class BluetoothChargeServer(Node):
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
             self.charge_state_publisher.publish(self.charge_state)
-            if time.time() - self.heartbeat_time > 20 and self.bluetooth_connected != None and self.heartbeat_time != 0 and self.charge_state.pid == '':
+            if time.time() - self.heartbeat_time > 20 and self.bluetooth_connected != None and self.heartbeat_time != 0:
                 self.get_logger().info("No data received more than 20 seconds.")
                 self.get_logger().info(f"current_time: {time.time()}")
                 self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
                 self.charge_state.pid = ''
                 self.disconnect_bluetooth = True
                 self.bluetooth_connected = None
+                self.heartbeat_time = 0
             self.publish_rate.sleep()
 
     def start_stop_charge_callback(self,msgs):
@@ -244,6 +268,7 @@ class BluetoothChargeServer(Node):
     # 连接充电桩蓝牙
     def connect_bluetooth(self,request, response):
         self.get_logger().info("正在重连蓝牙...")
+        self.heartbeat_time = 0
         self.connect_start_time = time.time()
         self.connect_exception = ""
         # print(os.system('sudo rfkill block bluetooth')) # bluetoothctl power off
@@ -271,8 +296,8 @@ class BluetoothChargeServer(Node):
                 self.disconnect_bluetooth = True
                 break
             else:              
-                self.get_logger().info(f"等待蓝牙连接: {request.mac} ......")
-                time.sleep(3)
+                self.get_logger().info(f"等待蓝牙连接: {request.mac} ......", throttle_duration_sec=1)
+                time.sleep(0.1)
                 continue
         # 判断蓝牙连接结果
         if self.bluetooth_connected == True:
@@ -379,7 +404,7 @@ class BluetoothChargeServer(Node):
                                 await self.bleak_client.stop_notify(self.uuid_notify)
                                 break
                         if self.disconnect_bluetooth:
-                            self.get_logger().info(f"断开蓝牙。")
+                            self.get_logger().info(f"调用disconnect()尝试断开蓝牙。")
                             await self.bleak_client.disconnect()
                             break
                         if self.send_data is not None:
@@ -411,9 +436,6 @@ class BluetoothChargeServer(Node):
                 await self.bleak_client.disconnect()
                 self.bluetooth_connected = False
             self.charge_state.pid = ""
-            # self.get_logger().info("No data received more than 10 seconds.")
-            # self.get_logger().info(f"current_time: {time.time()}")
-            # self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
         except Exception as e:
             self.bluetooth_connected = False
             self.charge_state.pid = ""
@@ -435,6 +457,7 @@ class BluetoothChargeServer(Node):
         # 将数据帧转化为列表
         data_list = data.split(',')
         self.get_logger().info(f'解析后的数据为： {data_list}', throttle_duration_sec=10)
+        self.heartbeat_time = time.time()
         # self.get_logger().debug(f'收到服务器的信息: {data}')
         # self.get_logger().debug(f'解析后的数据为: {data_list}', )
         # self.get_logger().debug(f'数据列表长度为: {len(data_list)} 字节')
@@ -451,8 +474,6 @@ class BluetoothChargeServer(Node):
         # 校验数据
         crc8_ = self.crc8(data_list[:-2])
         if crc8_ == data_list[-2].upper():
-            # print('jian ge shi jian:',time.time() - self.heartbeat_time)
-            self.heartbeat_time = time.time()
             # self.get_logger().debug('数据校验通过！')
             # self.get_logger().info('解析后的数据为：{}'.format(data_list))
             self.udp_data = data_list

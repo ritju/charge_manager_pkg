@@ -155,10 +155,11 @@ class chargeManager(Node):
     def charger_start_docking_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start_docking service')
         self.get_logger().info("start charge action")
-        self.get_logger().info(f"write 1 to /map/core_start.txt for /charger/start_docking")
+        self.get_logger().info(f"write 1 to /map/core_restart.txt for /charger/start_docking")
         try:
             with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
                 f.write('1\n')
+                f.write('self.mac')
         except Exception as e:
             self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charger/start_docking service.")
         self.charger_state.is_docking = True
@@ -175,7 +176,7 @@ class chargeManager(Node):
         self.charger_state.is_docking = False
         self.get_logger().info('received a request for /charger/stop_docking service')
         self.get_logger().info("stop charge action")
-        self.get_logger().info(f"write 0 to /map/core_start.txt for /charger/stop_docking")
+        self.get_logger().info(f"write 0 to /map/core_restart.txt for /charger/stop_docking")
         try:
             with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
                 f.write('0\n')
@@ -247,6 +248,7 @@ class chargeManager(Node):
             try:
                 with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
                     f.write('1\n')
+                    f.write(self.mac)
             except Exception as e:
                 self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing stop bluetooth_node failed.")
         
