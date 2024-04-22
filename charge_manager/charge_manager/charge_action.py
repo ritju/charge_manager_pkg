@@ -134,9 +134,11 @@ class ChargeAction(Node):
         # self.bluetooth_node_stopped = True # fix bug for stopping bluetooth failed(request bluetooth/start before bluetooth/stop completed.)
         if self.connect_bluetooth_client_.wait_for_service(2):
             self.bluetooth_node_stopped = False
+            self.bluetooth_setup = True
             self.get_logger().info('bluetooth server is on line')
         else:
             self.bluetooth_node_stopped = True
+            self.bluetooth_setup = False
             self.get_logger().info('bluetooth server is off line')
         self.bluetooth_state_stored = False
         self.core_monitor_state_stored = False
@@ -186,8 +188,10 @@ class ChargeAction(Node):
             pass
 
     def timer_loop_callback(self):
-        if not self.bluetooth_setup and self.bluetooth_reboot_requested and self.bluetooth_node_stopped:
+        # self.get_logger().info(f'setup: {self.bluetooth_setup}, requested: {self.bluetooth_reboot_requested}, stopped: {self.bluetooth_node_stopped}, stop_loop: {self.stop_loop}', throttle_duration_sec = 3)
+        if not self.bluetooth_setup and self.bluetooth_reboot_requested and self.bluetooth_node_stopped and not self.stop_loop:
             self.get_logger().info('setup bluetooth server node ......')
+            # self.get_logger().info(f'self.stop_loop: {"True" if self.stop_loop else "False"}')
             if self.bluetooth_start_client_.wait_for_service(1):
                 self.bluetooth_reboot_requested = False
                 self.connect_bluetooth_executing = False
@@ -204,9 +208,10 @@ class ChargeAction(Node):
                 
         # self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=10)
         if self.bluetooth_setup:
-            if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.bluetooth_rebooting: # do not connect bluetooth when rebooting bluetooth server
+            if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.bluetooth_rebooting and not self.stop_loop: # do not connect bluetooth when rebooting bluetooth server
                 self.connect_bluetooth_executing = True
                 self.get_logger().info(f"-------- call /connect_bluetooth service, {self.bluetooth_connect_num + 1} / {self.bluetooth_connect_num_max} --------")
+                # self.get_logger().info(f'self.stop_loop: {"True" if self.stop_loop else "False"}')
                 request = ConnectBluetooth.Request()
                 request.mac = self.mac
                 self.get_logger().info(f'request.mac {request.mac}')
@@ -215,7 +220,7 @@ class ChargeAction(Node):
                 self.future_connect_bluetooth = self.connect_bluetooth_client_.call_async(request)
                 self.future_connect_bluetooth.add_done_callback(self.connect_bluetooth_done_callback)                   
         else:
-            self.get_logger().info('waiting for bluetooth node ...', throttle_duration_sec = 10)
+            self.get_logger().info('waiting for bluetooth node ...', throttle_duration_sec = 3)
 
         if not self.dock_executing and not self.dock_completed:
             self.dock_executing = True
@@ -304,9 +309,9 @@ class ChargeAction(Node):
         self.loop_thread.start()
 
         while True:
-            if self.goal_handle and sigint_received:
-                self.get_logger().info(f'received a SIGINT signal when executing /charge action, aborting ......')
-                self.goal_handle.abort()
+            # if self.goal_handle and sigint_received:
+            #     self.get_logger().info(f'received a SIGINT signal when executing /charge action, aborting ......')
+            #     self.goal_handle.abort()
 
             if self.dock_completed:
                 if not self.bluetooth_state_stored:
@@ -326,6 +331,13 @@ class ChargeAction(Node):
                     self.get_logger().info(f'stop_loop: {"True" if self.stop_loop else "False"}')
                     self.get_logger().info(f'stop /charge action, type: {self.charge_type} ...... ')
                     self.get_logger().info(f"write 0 to /map/core_start.txt for stop charge action")
+                    if self.disconnect_bluetooth_client_.wait_for_service(2):
+                        self.get_logger().info('-------- call /disconnect_bluetooth service --------')
+                        re_disconnect_bluetooth = DisconnectBluetooth.Request()
+                        self.disconnect_bluetooth_future = self.disconnect_bluetooth_client_.call_async(re_disconnect_bluetooth)
+                        self.disconnect_bluetooth_future.add_done_callback(self.disconnect_bluetooth_callback)
+                    else:
+                        self.get_logger().info('/disconnect_bluetooth service is not on line')
                     try:
                         with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
                             f.write('0\n')
@@ -403,6 +415,11 @@ class ChargeAction(Node):
             
         self.connect_bluetooth_executing = False
     
+    def disconnect_bluetooth_callback(self, future):
+        response = future.result()        
+        self.get_logger().info(f'/disconnect_bluetooth service: {"success" if response.success else "Failed" }, cost time: {response.cost_time}, seconds, infos: {response.infos}"')
+
+    
     def dock_feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
         self.get_logger().info('***************** Dock Feedback *****************')
@@ -439,6 +456,7 @@ class ChargeAction(Node):
         else:
             self.get_logger().info('bluetooth/stop service result: failed.')
             self.get_logger().warn(f'infos: {response.infos}')
+            self.get_logger().info(f'cost_time: {response.cost_time} seconds.')
 
 
     def bluetooth_start_future_done_callback(self, future):
@@ -446,6 +464,7 @@ class ChargeAction(Node):
         if response.success:
             self.get_logger().info('bluetooth/start service result: success.')
             self.get_logger().info(f'infos: {response.infos}')
+            self.get_logger().info(f'cost_time: {response.cost_time} seconds.')
             self.bluetooth_setup = True
             self.bluetooth_node_stopped = False
             self.bluetooth_rebooting = False
@@ -457,18 +476,16 @@ class ChargeAction(Node):
 def sigint_handle(signal, frame):
     sigint_received = 1
     print('************ received a SIGINT signal ************')
+    time.sleep(5)
 
 def main(args=None):
+    # signal.signal(signal.SIGINT, sigint_handle)
     rclpy.init(args=args)
     charge_action_node = ChargeAction()
-    signal.signal(signal.SIGINT, sigint_handle)
     multi_executor = MultiThreadedExecutor()
     multi_executor.add_node(charge_action_node)
     multi_executor.spin()
-    # while not sigint_received:
-    #     multi_executor.spin_once()
-    # time.sleep(5)
-    rclpy.shutdown()
+    multi_executor.shutdown()
 
 if __name__ == '__main__':
     main()  

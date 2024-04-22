@@ -1,4 +1,5 @@
 
 ---
 bool success
+float64 cost_time
 string infos

@@ -208,6 +208,7 @@ class chargeManager(Node):
         self.get_logger().info('=== Charge action ===     result => success: {}'.format(result.success))
     
     def bluetooth_start_callback(self, request, response):
+        time_start = time.time()
         self.get_logger().info('received a request for /bluetooth/start service request.')
         
         try:
@@ -227,9 +228,12 @@ class chargeManager(Node):
             response.infos = str(e)
             self.get_logger().info(f'{response.infos}')
 
+        time_end = time.time()
+        response.cost_time = round(time_end - time_start, 1)
         return response
 
     def bluetooth_stop_callback(self, request, response):
+        time_start = time.time()
         self.get_logger().info('received a request for /bluetooth/stop service request.')
         try:
             if self.bluetooth_proc != None:
@@ -258,6 +262,8 @@ class chargeManager(Node):
         # os.killpg(self.bluetooth_proc.pid, SIGINT)
         
         self.bluetooth_status = BluetoothStatus.DOWN
+        time_end = time.time()
+        response.cost_time = round(time_end - time_start, 1)
         return response
     
 
@@ -273,7 +279,7 @@ class chargeManager(Node):
             self.get_logger().info(f'child_{index}\'s children num: {len(child.children(recursive=True))}')
             self.get_logger().info(f'Terminating child {index}, pid: {child.pid}, name: {child.name()} ......')
             child.send_signal(SIGINT)
-            rt_code = child.wait(5)
+            rt_code = child.wait(15)
             if rt_code == None:
                 self.get_logger().info(f'Terminate child {index} (pid: {child.pid}) failed.(need fixed.)')
                 # cmd = f'/usr/bin/kill -9 {child.pid}'
@@ -284,7 +290,7 @@ class chargeManager(Node):
             index += 1
 
         parent.send_signal(SIGINT)
-        rt_code = parent.wait(6)
+        rt_code = parent.wait(20)
         if rt_code == None:
                 self.get_logger().info(f'Terminate parent (pid: {parent.pid}) failed.')
         else:
