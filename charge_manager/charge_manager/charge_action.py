@@ -309,9 +309,14 @@ class ChargeAction(Node):
         self.loop_thread.start()
 
         while True:
-            # if self.goal_handle and sigint_received:
-            #     self.get_logger().info(f'received a SIGINT signal when executing /charge action, aborting ......')
-            #     self.goal_handle.abort()
+            if self.goal_handle and sigint_received:
+                self.get_logger().info(f'received a SIGINT signal when executing /charge action, aborting ......')
+                self.stop_loop = True
+                time.sleep(5)
+                rclpy.shutdown()
+                # self.goal_handle.abort()
+            
+            self.get_logger().info(f'sigint_received: {sigint_received}', throttle_duration_sec=1)
 
             if self.dock_completed:
                 if not self.bluetooth_state_stored:
@@ -370,7 +375,7 @@ class ChargeAction(Node):
     def loop_(self):
         self.get_logger().info('loop started')
         # self.timer_loop = self.create_timer(0.2, self.timer_loop_callback, self.cb_group)
-        while True:
+        while True and rclpy.ok():
             self.timer_loop_callback()
             if self.dock_completed:
                 if self.battery_ >= 1.01 or self.stop_loop or not self.charger_position_bool:
@@ -474,13 +479,15 @@ class ChargeAction(Node):
             self.bluetooth_rebooting = False
 
 def sigint_handle(signal, frame):
+    global sigint_received
     sigint_received = 1
     print('************ received a SIGINT signal ************')
+    print(f'sigint_received: {sigint_received}')
     time.sleep(5)
 
 def main(args=None):
-    # signal.signal(signal.SIGINT, sigint_handle)
     rclpy.init(args=args)
+    signal.signal(signal.SIGINT, sigint_handle)
     charge_action_node = ChargeAction()
     multi_executor = MultiThreadedExecutor()
     multi_executor.add_node(charge_action_node)
