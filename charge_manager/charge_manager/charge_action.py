@@ -107,8 +107,8 @@ class ChargeAction(Node):
         self.charger_start_client_last_request_time = time.time()
 
         # bluetooth start/stop client
-        self.bluetooth_start_client_ = self.create_client(StartBluetooth, '/bluetooth/start', callback_group=self.cb_group)
-        self.bluetooth_stop_client_ = self.create_client(StopBluetooth, '/bluetooth/stop', callback_group=self.cb_group)
+        # self.bluetooth_start_client_ = self.create_client(StartBluetooth, '/bluetooth/start', callback_group=self.cb_group)
+        # self.bluetooth_stop_client_ = self.create_client(StopBluetooth, '/bluetooth/stop', callback_group=self.cb_group)
         
         # 创建 charge action 服务端
         self.charge_action_server_ = ActionServer(self, Charge, 'charge', 
@@ -189,22 +189,22 @@ class ChargeAction(Node):
 
     def timer_loop_callback(self):
         # self.get_logger().info(f'setup: {self.bluetooth_setup}, requested: {self.bluetooth_reboot_requested}, stopped: {self.bluetooth_node_stopped}, stop_loop: {self.stop_loop}', throttle_duration_sec = 3)
-        if not self.bluetooth_setup and self.bluetooth_reboot_requested and self.bluetooth_node_stopped and not self.stop_loop:
-            self.get_logger().info('setup bluetooth server node ......')
-            # self.get_logger().info(f'self.stop_loop: {"True" if self.stop_loop else "False"}')
-            if self.bluetooth_start_client_.wait_for_service(1):
-                self.bluetooth_reboot_requested = False
-                self.connect_bluetooth_executing = False
-                self.bluetooth_rebooting_num += 1
-                self.get_logger().info(f'-------- call /bluetooth/start service --------')
-                self.bluetooth_start_future = self.bluetooth_start_client_.call_async(StartBluetooth.Request())
-                self.bluetooth_start_future.add_done_callback(self.bluetooth_start_future_done_callback)
-            else:
-                self.get_logger().info('bluetooth/start service not on line, waiting', throttle_duration_sec = 5)
+        # if not self.bluetooth_setup and self.bluetooth_reboot_requested and self.bluetooth_node_stopped and not self.stop_loop:
+        #     self.get_logger().info('setup bluetooth server node ......')
+        #     # self.get_logger().info(f'self.stop_loop: {"True" if self.stop_loop else "False"}')
+        #     if self.bluetooth_start_client_.wait_for_service(1):
+        #         self.bluetooth_reboot_requested = False
+        #         self.connect_bluetooth_executing = False
+        #         self.bluetooth_rebooting_num += 1
+        #         self.get_logger().info(f'-------- call /bluetooth/start service --------')
+        #         self.bluetooth_start_future = self.bluetooth_start_client_.call_async(StartBluetooth.Request())
+        #         self.bluetooth_start_future.add_done_callback(self.bluetooth_start_future_done_callback)
+        #     else:
+        #         self.get_logger().info('bluetooth/start service not on line, waiting', throttle_duration_sec = 5)
 
-        if self.bluetooth_rebooting_num_last != self.bluetooth_rebooting_num:
-            self.get_logger().info(f'bluetooth server node reboot numbers: {self.bluetooth_rebooting_num}.')
-            self.bluetooth_rebooting_num_last = self.bluetooth_rebooting_num
+        # if self.bluetooth_rebooting_num_last != self.bluetooth_rebooting_num:
+        #     self.get_logger().info(f'bluetooth server node reboot numbers: {self.bluetooth_rebooting_num}.')
+        #     self.bluetooth_rebooting_num_last = self.bluetooth_rebooting_num
                 
         # self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=10)
         if self.bluetooth_setup:
@@ -402,16 +402,16 @@ class ChargeAction(Node):
             self.bluetooth_rebooting_num = -1
             self.bluetooth_rebooting_num_last = -1
         
-        if self.bluetooth_connect_num >= self.bluetooth_connect_num_max and not response.success:
-            num_old = self.bluetooth_connect_num
-            self.bluetooth_connect_num = 0
-            self.bluetooth_reboot_requested = True
-            self.bluetooth_rebooting = True
-            # self.bluetooth_setup = False #fix bug for stopping bluetooth failed(request bluetooth/start before bluetooth/stop completed.)
-            # self.get_logger().info(f'bluetooth_connect_num is {num_old} >= {self.bluetooth_connect_num_max}, reboot bluetooth server node')
-            self.get_logger().info('-------- call /bluetooth/stop service --------')
-            self.bluetooth_stop_future = self.bluetooth_stop_client_.call_async(StopBluetooth.Request())
-            self.bluetooth_stop_future.add_done_callback(self.bluetooth_stop_future_done_callback)      
+        # if self.bluetooth_connect_num >= self.bluetooth_connect_num_max and not response.success:
+        #     num_old = self.bluetooth_connect_num
+        #     self.bluetooth_connect_num = 0
+        #     self.bluetooth_reboot_requested = True
+        #     self.bluetooth_rebooting = True
+        #     # self.bluetooth_setup = False #fix bug for stopping bluetooth failed(request bluetooth/start before bluetooth/stop completed.)
+        #     # self.get_logger().info(f'bluetooth_connect_num is {num_old} >= {self.bluetooth_connect_num_max}, reboot bluetooth server node')
+        #     self.get_logger().info('-------- call /bluetooth/stop service --------')
+        #     self.bluetooth_stop_future = self.bluetooth_stop_client_.call_async(StopBluetooth.Request())
+        #     self.bluetooth_stop_future.add_done_callback(self.bluetooth_stop_future_done_callback)      
             
         self.connect_bluetooth_executing = False
     

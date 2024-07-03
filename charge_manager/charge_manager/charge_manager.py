@@ -84,10 +84,10 @@ class chargeManager(Node):
         self.charger_stop_docking_service = self.create_service(Empty, '/charger/stop_docking', self.charger_stop_docking_service_callback, callback_group=callback_group_type)
 
         # /bluetooth/start
-        self.bluetooth_start_service = self.create_service(StartBluetooth, '/bluetooth/start', self.bluetooth_start_callback, callback_group=callback_group_type)
+        # self.bluetooth_start_service = self.create_service(StartBluetooth, '/bluetooth/start', self.bluetooth_start_callback, callback_group=callback_group_type)
 
         # /bluetooth/stop
-        self.bluetooth_stop_service = self.create_service(StopBluetooth, '/bluetooth/stop', self.bluetooth_stop_callback, callback_group=callback_group_type)
+        # self.bluetooth_stop_service = self.create_service(StopBluetooth, '/bluetooth/stop', self.bluetooth_stop_callback, callback_group=callback_group_type)
 
         self.charge_action_client = ActionClient(self, Charge, 'charge', callback_group=callback_group_type)
 
@@ -207,64 +207,64 @@ class chargeManager(Node):
         self.charger_state.is_docking = False
         self.get_logger().info('=== Charge action ===     result => success: {}'.format(result.success))
     
-    def bluetooth_start_callback(self, request, response):
-        time_start = time.time()
-        self.get_logger().info('received a request for /bluetooth/start service request.')
+    # def bluetooth_start_callback(self, request, response):
+    #     time_start = time.time()
+    #     self.get_logger().info('received a request for /bluetooth/start service request.')
         
-        try:
-            if self.bluetooth_proc != None:
-                self.get_logger().info('bluetooth server is online, do noting')
-            else:
-                self.bluetooth_proc = subprocess.Popen(
-                    ["ros2", "run", "charge_manager", "charge_bluetooth_old"])
+    #     try:
+    #         if self.bluetooth_proc != None:
+    #             self.get_logger().info('bluetooth server is online, do noting')
+    #         else:
+    #             self.bluetooth_proc = subprocess.Popen(
+    #                 ["ros2", "run", "charge_manager", "charge_bluetooth_old"])
             
-            time.sleep(10)        # waiting for bluetooth server node setup completed.
-            self.bluetooth_status = BluetoothStatus.UP
-            response.success = True
-            response.infos = "start bluetooth node success"
-            self.get_logger().info(f'{response.infos}')
-        except Exception as e:
-            response.success = False
-            response.infos = str(e)
-            self.get_logger().info(f'{response.infos}')
+    #         time.sleep(10)        # waiting for bluetooth server node setup completed.
+    #         self.bluetooth_status = BluetoothStatus.UP
+    #         response.success = True
+    #         response.infos = "start bluetooth node success"
+    #         self.get_logger().info(f'{response.infos}')
+    #     except Exception as e:
+    #         response.success = False
+    #         response.infos = str(e)
+    #         self.get_logger().info(f'{response.infos}')
 
-        time_end = time.time()
-        response.cost_time = round(time_end - time_start, 1)
-        return response
+    #     time_end = time.time()
+    #     response.cost_time = round(time_end - time_start, 1)
+    #     return response
 
-    def bluetooth_stop_callback(self, request, response):
-        time_start = time.time()
-        self.get_logger().info('received a request for /bluetooth/stop service request.')
-        try:
-            if self.bluetooth_proc != None:
-                self.terminate(self.bluetooth_proc)
-                self.bluetooth_proc = None
-            else:
-                self.get_logger().info('bluetooth server is not online, do nothing')
-            response.success = True
-            response.infos = "stop bluetooth node success."
-            self.get_logger().info(f'{response.infos}')
-        except Exception as e:
-            response.success = False
-            response.infos = str(e)
-            self.get_logger().info(f'when stop bluetooth, catch exception: {response.infos}')
-            self.get_logger().info(f'write 1 to /map/core_restart.txt for stopping bluetooth node failed.')
-            try:
-                with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
-                    f.write('1\n')
-                    f.write(self.mac)
-            except Exception as e:
-                self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing stop bluetooth_node failed.")
+    # def bluetooth_stop_callback(self, request, response):
+    #     time_start = time.time()
+    #     self.get_logger().info('received a request for /bluetooth/stop service request.')
+    #     try:
+    #         if self.bluetooth_proc != None:
+    #             self.terminate(self.bluetooth_proc)
+    #             self.bluetooth_proc = None
+    #         else:
+    #             self.get_logger().info('bluetooth server is not online, do nothing')
+    #         response.success = True
+    #         response.infos = "stop bluetooth node success."
+    #         self.get_logger().info(f'{response.infos}')
+    #     except Exception as e:
+    #         response.success = False
+    #         response.infos = str(e)
+    #         self.get_logger().info(f'when stop bluetooth, catch exception: {response.infos}')
+    #         self.get_logger().info(f'write 1 to /map/core_restart.txt for stopping bluetooth node failed.')
+    #         try:
+    #             with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+    #                 f.write('1\n')
+    #                 f.write(self.mac)
+    #         except Exception as e:
+    #             self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing stop bluetooth_node failed.")
         
-        # don't kill child process success
-        # self.bluetooth_proc.terminate()
-        # self.bluetooth_proc.wait()
-        # os.killpg(self.bluetooth_proc.pid, SIGINT)
+    #     # don't kill child process success
+    #     # self.bluetooth_proc.terminate()
+    #     # self.bluetooth_proc.wait()
+    #     # os.killpg(self.bluetooth_proc.pid, SIGINT)
         
-        self.bluetooth_status = BluetoothStatus.DOWN
-        time_end = time.time()
-        response.cost_time = round(time_end - time_start, 1)
-        return response
+    #     self.bluetooth_status = BluetoothStatus.DOWN
+    #     time_end = time.time()
+    #     response.cost_time = round(time_end - time_start, 1)
+    #     return response
     
 
     def terminate(self, proc: subprocess.Popen):

@@ -267,6 +267,15 @@ class BluetoothChargeServer(Node):
 
     # 连接充电桩蓝牙
     def connect_bluetooth(self,request, response):
+        time.sleep(3)
+        restore = 0 # 蓝牙是否正在恢复中
+        with open('/map/bluetooth_restore.txt', 'r', encoding='utf-8') as f:
+            restore = (int)(f.readline().strip('\n'))
+            self.get_logger().info(f'restore: {restore}')
+        time_wait = time.time()
+        while restore  and (time.time() - time_wait) < 50.0:
+            time.sleep(1)
+            self.get_logger().info("Waiting for bluetooth restoring ......")
         self.get_logger().info("正在重连蓝牙...")
         self.heartbeat_time = 0
         self.connect_start_time = time.time()
@@ -305,11 +314,21 @@ class BluetoothChargeServer(Node):
             response.success = True
             response.connection_time = round(time.time() - self.connect_start_time, 1)
             response.result = f"蓝牙连接成功 {self.connect_exception}"
+            try:
+                with open('/map/bluetooth_restore.txt', 'w', encoding='utf-8') as f:
+                    f.write('0\n')
+            except Exception as e:
+                self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/bluetooth_restore.txt when bluetooth is connected success.")
         else:
             self.get_logger().info('蓝牙连接失败.')
             response.success = False
             response.connection_time = round(time.time() - self.connect_start_time, 1)
             response.result = f"蓝牙连接失败  {self.connect_exception}"
+            try:
+                with open('/map/bluetooth_restore.txt', 'w', encoding='utf-8') as f:
+                    f.write('1\n')
+            except Exception as e:
+                self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/bluetooth_restore.txt when bluetooth is connected failed.")
         return response
 
     # 创建bleak客户端
