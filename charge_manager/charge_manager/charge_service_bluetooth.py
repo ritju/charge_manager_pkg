@@ -273,9 +273,11 @@ class BluetoothChargeServer(Node):
             restore = (int)(f.readline().strip('\n'))
             self.get_logger().info(f'restore: {restore}')
         time_wait = time.time()
-        while restore  and (time.time() - time_wait) < 50.0:
-            time.sleep(1)
+        while restore  and (time.time() - time_wait) < 25.0:
             self.get_logger().info("Waiting for bluetooth restoring ......")
+            time.sleep(2)
+            with open('/map/bluetooth_restore.txt', 'r', encoding='utf-8') as f:
+                restore = (int)(f.readline().strip('\n'))
         self.get_logger().info("正在重连蓝牙...")
         self.heartbeat_time = 0
         self.connect_start_time = time.time()

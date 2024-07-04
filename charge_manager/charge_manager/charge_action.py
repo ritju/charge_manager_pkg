@@ -157,7 +157,7 @@ class ChargeAction(Node):
         self.stop_loop = False
 
         self.bluetooth_connect_num = 0
-        self.bluetooth_connect_num_max = 2
+        self.bluetooth_connect_num_max = 99999
 
     def is_undocking_state_sub_callback(self, msg):
         self.is_undocking_state = msg.data
@@ -301,7 +301,7 @@ class ChargeAction(Node):
                 self.get_logger().info(f'write 1 to /map/core_restart.txt when /charge action started')
                 with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
                     f.write('1\n')
-                    f.write(self.mac)
+                    # f.write(self.mac)
             except Exception as e:
                 self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charge action started.")
         

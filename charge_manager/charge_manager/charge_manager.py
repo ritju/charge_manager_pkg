@@ -159,7 +159,7 @@ class chargeManager(Node):
         try:
             with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
                 f.write('1\n')
-                f.write('self.mac')
+                # f.write('self.mac')
         except Exception as e:
             self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charger/start_docking service.")
         self.charger_state.is_docking = True
