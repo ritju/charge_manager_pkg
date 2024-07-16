@@ -12,7 +12,7 @@ import time
 import os
 
 from std_srvs.srv import Empty
-from std_msgs.msg import Int8
+from std_msgs.msg import Int8, Bool
 from std_msgs.msg import String
 from charge_manager_msgs.action import Charge
 from charge_manager_msgs.msg import ChargeState2
@@ -20,6 +20,7 @@ from charge_manager_msgs.msg import BluetoothStatus
 from charge_manager_msgs.srv import StartBluetooth, StopBluetooth
 from capella_ros_service_interfaces.msg import ChargeState
 from geometry_msgs.msg import Twist
+from capella_ros_dock_msgs.msg import ChargerContactConditionType
 
 class chargeManager(Node):
     
@@ -45,6 +46,11 @@ class chargeManager(Node):
         self.charger_state.is_charging = False
         self.charger_state.is_docking = False
 
+        self.charger_state2 = ChargeState2()
+        self.charger_state2.pid = ''
+        self.charger_state2.has_contact = False
+        self.charger_state2.is_charging = False
+
         # /charger/id subscription
         charger_id_sub_qos = QoSProfile(depth=1)
         charger_id_sub_qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -63,6 +69,18 @@ class chargeManager(Node):
         charger_state_qos2.durability = DurabilityPolicy.VOLATILE
         # 订阅蓝牙server发送的 ChargeState2
         self.charger_state2_sub_ = self.create_subscription(ChargeState2, '/charger/state2', self.charger_state2_sub_callback, charger_state_qos, callback_group=callback_group_type)
+
+        self.contact_state_type = 0
+        contact_state_qos = QoSProfile(depth=1)
+        contact_state_qos.reliability = ReliabilityPolicy.RELIABLE
+        contact_state_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        contact_state_qos.history = HistoryPolicy.KEEP_LAST
+        contact_state_type_sub_ = self.create_subscription(ChargerContactConditionType, "/charger_contact_condition_type", 
+                                                           self.contact_state_sub_callback, contact_state_qos, callback_group=callback_group_type)
+        
+        self.contact_camera = False
+        contact_camera_sub_ = self.create_subscription(Bool, "/charger_contact_via_camera", 
+                                                       self.contact_camera_sub_callback, contact_state_qos, callback_group=callback_group_type)
 
         # 初始化 /charger/state publisher        
         self.charger_state_publisher = self.create_publisher(ChargeState, '/charger/state', charger_state_qos2, callback_group=callback_group_type)
@@ -117,10 +135,40 @@ class chargeManager(Node):
         except Exception as e:
             self.get_logger().info(f'catch exception {str(e)}, when charge_manage node init.')
 
+    def contact_state_sub_callback(self, msg):
+        self.contact_state_type = msg.type
 
-      
+    def contact_camera_sub_callback(self, msg):
+        self.contact_camera = msg.data
+
     def timer_pub_charger_state_callback(self):
-         self.charger_state_publisher.publish(self.charger_state)
+        if self.contact_state_type == 0:
+            self.charger_state.pid = self.charger_state2.pid
+            self.charger_state.has_contact = self.charger_state2.has_contact
+            self.charger_state.is_charging = self.charger_state2.is_charging
+            if self.charger_state2.has_contact:
+                self.charger_state.is_docking = False
+        elif self.contact_state_type == 1:
+             self.charger_state.pid = self.mac
+             self.charger_state.has_contact = self.contact_camera
+             self.charger_state.is_charging = False # need fix by current's value
+             if self.contact_camera:
+                 self.charger_state.is_docking = False
+        elif self.contact_state_type == 2:
+            if self.charger_state.pid != '':
+                self.charger_state.pid = self.charger_state2.pid
+                self.charger_state.has_contact = self.charger_state2.has_contact
+                self.charger_state.is_charging = self.charger_state2.is_charging
+                if self.charger_state2.has_contact:
+                    self.charger_state.is_docking = False
+            else:
+                self.charger_state.pid = self.mac
+                self.charger_state.has_contact = self.contact_camera
+                self.charger_state.is_charging = False # need fix by current's value
+                if self.contact_camera:
+                    self.charger_state.is_docking = False
+        self.charger_state_publisher.publish(self.charger_state)
+        
         #  if self.charger_state.is_charging and self.charger_state.has_contact:
         #      zero_cmd = Twist()
         #      zero_cmd.linear.x = 0.0
@@ -128,11 +176,7 @@ class chargeManager(Node):
         #      self.zero_cmd_vel_publisher.publish(zero_cmd)
 
     def charger_state2_sub_callback(self, msg):
-        self.charger_state.pid = msg.pid
-        self.charger_state.has_contact = msg.has_contact
-        self.charger_state.is_charging = msg.is_charging
-        if msg.has_contact:
-            self.charger_state.is_docking = False
+        self.charger_state2 = msg
     
     def charger_id_sub_callback(self, msg):
         if msg.data != '':
