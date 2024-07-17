@@ -137,6 +137,7 @@ class chargeManager(Node):
 
     def contact_state_sub_callback(self, msg):
         self.contact_state_type = msg.type
+        self.get_logger().info(f"get charger_contact_state_type {self.contact_state_type} from topic /charger_contact_condition_type.")
 
     def contact_camera_sub_callback(self, msg):
         self.contact_camera = msg.data

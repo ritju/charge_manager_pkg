@@ -23,6 +23,8 @@ from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 from capella_ros_msg.msg import Velocities
 
+from capella_ros_dock_msgs.msg import ChargerContactConditionType
+
 sigint_received = 0
 
 class ChargeActionState():
@@ -54,6 +56,15 @@ class ChargeAction(Node):
         
         self.msg_state_pub = Bool()
         self.msg_state_pub.data = False
+
+        self.contact_state_type = 0 # default using bluetooth only
+        contact_state_qos = QoSProfile(depth=1)
+        contact_state_qos.reliability = ReliabilityPolicy.RELIABLE
+        contact_state_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        contact_state_qos.history = HistoryPolicy.KEEP_LAST
+        callback_group_type = ReentrantCallbackGroup()
+        contact_state_type_sub_ = self.create_subscription(ChargerContactConditionType, "/charger_contact_condition_type", 
+                                                           self.contact_state_sub_callback, contact_state_qos, callback_group=callback_group_type)
 
         # 定义 callback_group 类型
         self.cb_group = ReentrantCallbackGroup()
@@ -122,7 +133,11 @@ class ChargeAction(Node):
         self.charge_type = ''
         self.goal_handle = None
         self.init_params() 
-        
+
+    def contact_state_sub_callback(self, msg):
+        self.contact_state_type = msg.type
+        self.get_logger().info(f"get charger_contact_state_type {self.contact_state_type} from topic /charger_contact_condition_type.")
+    
     def init_params(self):        
         # 初始化蓝牙相关参数
         self.mac = ''
@@ -207,7 +222,7 @@ class ChargeAction(Node):
         #     self.bluetooth_rebooting_num_last = self.bluetooth_rebooting_num
                 
         # self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=10)
-        if self.bluetooth_setup:
+        if self.bluetooth_setup and self.contact_state_type != 1: # 0: bluetooth only, 1: camera only , 2: bluetooth and camera
             if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.bluetooth_rebooting and not self.stop_loop: # do not connect bluetooth when rebooting bluetooth server
                 self.connect_bluetooth_executing = True
                 self.get_logger().info(f"-------- call /connect_bluetooth service, {self.bluetooth_connect_num + 1} / {self.bluetooth_connect_num_max} --------")
