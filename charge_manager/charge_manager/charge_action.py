@@ -117,7 +117,7 @@ class ChargeAction(Node):
                                                   goal_callback=self.charge_action_goal_callback,
                                                   handle_accepted_callback=self.charge_action_handle_accepted_callback,
                                                   cancel_callback=self.charge_action_cancel_callback,
-                                                  result_timeout=-1
+                                                  result_timeout=3600000
                                                   )
 
         self.charge_type = ''
