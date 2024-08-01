@@ -313,6 +313,7 @@ class BluetoothChargeServer(Node):
         # 判断蓝牙连接结果
         if self.bluetooth_connected == True:
             self.get_logger().info('蓝牙连接成功.')
+            self.heartbeat_time = time.time()
             response.success = True
             response.connection_time = round(time.time() - self.connect_start_time, 1)
             response.result = f"蓝牙连接成功 {self.connect_exception}"
