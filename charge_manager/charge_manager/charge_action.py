@@ -208,6 +208,12 @@ class ChargeAction(Node):
         #     self.bluetooth_rebooting_num_last = self.bluetooth_rebooting_num
                 
         # self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=10)
+        
+        if self.connect_bluetooth_client_.wait_for_service(2):
+            self.bluetooth_setup = True
+        else:
+            self.bluetooth_setup = False
+        
         if self.bluetooth_setup:
             if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.bluetooth_rebooting and not self.stop_loop: # do not connect bluetooth when rebooting bluetooth server
                 self.connect_bluetooth_executing = True
@@ -248,7 +254,7 @@ class ChargeAction(Node):
             self.feedback_msg.state = ChargeActionState.docking
         elif self.charger_state.is_charging:
             self.feedback_msg.state = ChargeActionState.charging
-        # self.get_logger().info(f"=== charge action ===      state: {self.feedback_msg.state}", throttle_duration_sec=4)
+        # self.get_logger().info(f"=== charge action ===      state: {self.feedback_msg.state}", throttle_duration_sec=1)
         self.goal_handle.publish_feedback(self.feedback_msg)
         
 
@@ -375,6 +381,8 @@ class ChargeAction(Node):
             self.timer_loop_callback()
             if self.dock_completed:
                 if self.battery_ >= 1.01 or self.stop_loop or not self.charger_position_bool:
+                    self.get_logger().info("break timer_loop_callback")
+                    self.get_logger().info(f"battery: {self.battery_}, stop_loop: {str(self.stop_loop)}, charge_position_bool: {str(self.charger_position_bool)}")
                     break
             else:
                 continue
