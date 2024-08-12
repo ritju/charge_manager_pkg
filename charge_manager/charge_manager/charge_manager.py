@@ -45,6 +45,8 @@ class chargeManager(Node):
         self.charger_state.is_charging = False
         self.charger_state.is_docking = False
 
+        self.contact_state_last_ = False
+
         # /charger/id subscription
         charger_id_sub_qos = QoSProfile(depth=1)
         charger_id_sub_qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -121,6 +123,9 @@ class chargeManager(Node):
       
     def timer_pub_charger_state_callback(self):
          self.charger_state_publisher.publish(self.charger_state)
+         if self.contact_state_last_ != self.charger_state.has_contact:
+                self.get_logger().info(f"managed node => contact state change from {str(self.contact_state_last_)} to {str(self.charger_state.has_contact)}")
+                self.contact_state_last_ = self.charger_state.has_contact
         #  if self.charger_state.is_charging and self.charger_state.has_contact:
         #      zero_cmd = Twist()
         #      zero_cmd.linear.x = 0.0

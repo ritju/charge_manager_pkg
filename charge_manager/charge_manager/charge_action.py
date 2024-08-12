@@ -160,6 +160,9 @@ class ChargeAction(Node):
         self.bluetooth_connect_num = 0
         self.bluetooth_connect_num_max = 99999
 
+        # add process when dock goal is rejected
+        self.dock_goal_rejected = False
+
     def is_undocking_state_sub_callback(self, msg):
         self.is_undocking_state = msg.data
         self.is_undocking_state_last_time = time.time()
@@ -320,6 +323,21 @@ class ChargeAction(Node):
             #     self.get_logger().info(f'received a SIGINT signal when executing /charge action, aborting ......')
             #     self.goal_handle.abort()
 
+            if self.dock_goal_rejected:
+                self.get_logger().info("return Charge action for reason: dock action is rejected.")
+                result = Charge.Result()
+                result.success = False
+                self.goal_handle.abort()
+                try:
+                    self.get_logger().info(f'存储充电状态 0 和 mac: {self.mac} 到/map/charge_restore.txt.')
+                    with open('/map/charge_restore.txt', 'w', encoding='utf-8') as f:
+                        f.write('0\n')
+                        f.write(self.mac)
+                except Exception as e:
+                    self.get_logger().info(f'存储充电状态 0 catch exception: {str(e)}')
+                self.msg_state_pub.data = False
+                return result
+
             if self.dock_completed:
                 if not self.bluetooth_state_stored:
                     self.bluetooth_state_stored = True
@@ -385,6 +403,9 @@ class ChargeAction(Node):
                     self.get_logger().info(f"battery: {self.battery_}, stop_loop: {str(self.stop_loop)}, charge_position_bool: {str(self.charger_position_bool)}")
                     break
             else:
+                if self.dock_goal_rejected:
+                    self.get_logger().info("dock action reject => stop loop.")
+                    break
                 continue
             time.sleep(1)
 
@@ -441,6 +462,7 @@ class ChargeAction(Node):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().info('dock goal rejected !')
+            self.dock_goal_rejected = True
         else:
             self.get_logger().info('dock goal accepted.')
             self._dock_get_future_result = goal_handle.get_result_async()

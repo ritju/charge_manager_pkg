@@ -90,6 +90,7 @@ class BluetoothChargeServer(Node):
         self.charge_state.pid = ""
         self.charge_state.has_contact = False
         self.charge_state.is_charging = False
+        self.contact_state_last_ = False
         # 在机器人状态发布器
         self.charge_state_publisher = self.create_publisher(ChargeState2, '/charger/state2', charger_state_qos, callback_group=ReentrantCallbackGroup())
         self.publish_rate = self.create_rate(20)
@@ -170,6 +171,9 @@ class BluetoothChargeServer(Node):
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
             self.charge_state_publisher.publish(self.charge_state)
+            if self.contact_state_last_ != self.charge_state.has_contact:
+                self.get_logger().info(f"bluetooth => contact state change from {str(self.contact_state_last_)} to {str(self.charge_state.has_contact)}")
+                self.contact_state_last_ = self.charge_state.has_contact
             if time.time() - self.heartbeat_time > 20 and self.bluetooth_connected != None and self.heartbeat_time != 0:
                 self.get_logger().info("No data received more than 20 seconds.")
                 self.get_logger().info(f"current_time: {time.time()}")
