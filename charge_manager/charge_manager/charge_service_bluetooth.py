@@ -17,7 +17,8 @@ import subprocess
 import psutil
 from signal import SIGINT, SIGTERM
 
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 
 from bleak.assigned_numbers import AdvertisementDataType
 from bleak.backends.bluezdbus.advertisement_monitor import OrPattern
@@ -76,10 +77,11 @@ class BluetoothChargeServer(Node):
         self.heartbeat_time = 0
         # 是否断开蓝牙的属性
         self.disconnect_bluetooth = False
+
         # 通过bssid链接充电桩WIFI服务
-        self.bluetooth_concact_server = self.create_service(ConnectBluetooth, '/connect_bluetooth', self.connect_bluetooth)
+        self.bluetooth_concact_server = self.create_service(ConnectBluetooth, '/connect_bluetooth', self.connect_bluetooth, callback_group=ReentrantCallbackGroup())
         # 断开蓝牙服务
-        self.bluetooth_disconnect_server = self.create_service(DisconnectBluetooth, '/disconnect_bluetooth', self.disconnect_bluetooth_callback)
+        self.bluetooth_disconnect_server = self.create_service(DisconnectBluetooth, '/disconnect_bluetooth', self.disconnect_bluetooth_callback, callback_group=MutuallyExclusiveCallbackGroup())
         # # 话题和订阅器的qos
         charger_state_qos = QoSProfile(depth=1)
         charger_state_qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -271,7 +273,16 @@ class BluetoothChargeServer(Node):
 
     # 连接充电桩蓝牙
     def connect_bluetooth(self,request, response):
+        self.get_logger().info("Received a request for connect bluetooth")
         time.sleep(3)
+        
+        # test service block(connect/disconnect bluetooth)
+        # number = 20
+        # while(number > 0):
+        #     self.get_logger().info(f"number1: {number}")
+        #     time.sleep(1)
+        #     number = number -1
+
         restore = 0 # 蓝牙是否正在恢复中
         with open('/map/bluetooth_restore.txt', 'r', encoding='utf-8') as f:
             restore = (int)(f.readline().strip('\n'))
@@ -555,9 +566,12 @@ class BluetoothChargeServer(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = BluetoothChargeServer('bluetooth_charge_server')
-    rclpy.spin(node)
-    rclpy.shutdown()
+    bluetooth_server_node = BluetoothChargeServer('bluetooth_charge_server')
+
+    multi_executor = MultiThreadedExecutor()
+    multi_executor.add_node(bluetooth_server_node)
+    multi_executor.spin()
+    multi_executor.shutdown()
 
 
 if __name__ == '__main__':
