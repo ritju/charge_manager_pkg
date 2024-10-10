@@ -13,6 +13,7 @@ import os
 
 from std_srvs.srv import Empty
 from std_msgs.msg import String
+from std_msgs.msg import UInt8
 from charge_manager_msgs.action import Charge
 from charge_manager_msgs.msg import ChargeState2
 from charge_manager_msgs.msg import BluetoothStatus
@@ -44,6 +45,8 @@ class chargeManager(Node):
         self.charger_state.has_contact = False
         self.charger_state.is_charging = False
         self.charger_state.is_docking = False
+        self.charger_state.is_waterflooding = False
+        self.charger_state.water_mode = 'unknown'
 
         self.contact_state_last_ = False
 
@@ -69,6 +72,15 @@ class chargeManager(Node):
         # 初始化 /charger/state publisher        
         self.charger_state_publisher = self.create_publisher(ChargeState, '/charger/state', charger_state_qos2, callback_group=callback_group_type)
         self.timer_pub_charger_state = self.create_timer(0.05, self.timer_pub_charger_state_callback, callback_group=callback_group_type)
+        
+        water_status_publisher_qos = QoSProfile(depth=1)
+        water_status_publisher_qos.reliability = ReliabilityPolicy.RELIABLE
+        water_status_publisher_qos.history = HistoryPolicy.KEEP_LAST
+        water_status_publisher_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        self.water_status_publisher = self.create_publisher(UInt8, "/add_water_stu", water_status_publisher_qos, callback_group=callback_group_type)
+
+        self.add_water_status_last = 100
+        self.add_water_status = 100
         
         # 初始化 zero_cmd_vel_publisher
         # self.zero_cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 1, callback_group=callback_group_type)
@@ -128,10 +140,25 @@ class chargeManager(Node):
 
       
     def timer_pub_charger_state_callback(self):
-         self.charger_state_publisher.publish(self.charger_state)
-         if self.contact_state_last_ != self.charger_state.has_contact:
-                self.get_logger().info(f"managed node => contact state change from {str(self.contact_state_last_)} to {str(self.charger_state.has_contact)}")
-                self.contact_state_last_ = self.charger_state.has_contact
+        self.charger_state_publisher.publish(self.charger_state)
+        if self.contact_state_last_ != self.charger_state.has_contact:
+            self.get_logger().info(f"managed node => contact state change from {str(self.contact_state_last_)} to {str(self.charger_state.has_contact)}")
+            self.contact_state_last_ = self.charger_state.has_contact
+        if self.charger_state.is_waterflooding == True:
+            if self.charger_state.water_mode == 'auto':
+                self.add_water_status = 1
+            elif self.charger_state.water_mode == 'manual':
+                self.add_water_status = 2
+        else:
+            self.add_water_status = 0
+        
+        if self.add_water_status != self.add_water_status_last:
+            msg = UInt8()
+            msg.data = self.add_water_status
+            self.water_status_publisher.publish(msg)
+            self.add_water_status_last = self.add_water_status
+        
+        
         #  if self.charger_state.is_charging and self.charger_state.has_contact:
         #      zero_cmd = Twist()
         #      zero_cmd.linear.x = 0.0
@@ -142,7 +169,7 @@ class chargeManager(Node):
         self.charger_state.pid = msg.pid
         self.charger_state.has_contact = msg.has_contact
         self.charger_state.is_charging = msg.is_charging
-        self.is_waterflooding = msg.is_waterflooding
+        self.charger_state.is_waterflooding = msg.is_waterflooding
         self.charger_state.water_mode = msg.water_mode
         if msg.has_contact:
             self.charger_state.is_docking = False
