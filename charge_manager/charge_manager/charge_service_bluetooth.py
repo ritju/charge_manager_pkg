@@ -92,6 +92,7 @@ class BluetoothChargeServer(Node):
         self.charge_state.pid = ""
         self.charge_state.has_contact = False
         self.charge_state.is_charging = False
+        self.charge_state.is_waterflooding = False
         self.contact_state_last_ = False
         # 在机器人状态发布器
         self.charge_state_publisher = self.create_publisher(ChargeState2, '/charger/state2', charger_state_qos, callback_group=ReentrantCallbackGroup())
@@ -190,7 +191,7 @@ class BluetoothChargeServer(Node):
         if self.charge_state.pid == '':
             self.get_logger().info('未连接充电桩bluetooth,请先连接！')
         else:
-            if msgs.data == BluetoothCommand.CHARGER_START:
+            if msgs.command == BluetoothCommand.CHARGER_START:
                 time.sleep(0.5)
                 self.get_logger().info('收到开始充电命令')
                 # 判断是否还没接触上充电桩，没接触上直接返回失败
@@ -229,7 +230,7 @@ class BluetoothChargeServer(Node):
                         else:
                             time.sleep(1)
 
-            elif msgs.data == BluetoothCommand.CHARGER_STOP:
+            elif msgs.command == BluetoothCommand.CHARGER_STOP:
                 self.get_logger().info('收到停止充电命令')
                 if self.charge_state.is_charging == False:
                     self.get_logger().info('本来就没充电。')
@@ -264,9 +265,12 @@ class BluetoothChargeServer(Node):
                         else:
                             time.sleep(1)
 
-            elif msgs.data == BluetoothCommand.WATER_START:
+            elif msgs.command == BluetoothCommand.WATER_START:
                 self.get_logger().info('收到开始加水命令')
-                if self.charge_state.is_waterflooding == False:
+                # 判断是否还没接触上充电桩，没接触上直接返回失败
+                if self.charge_state.has_contact == False:
+                    self.get_logger().info("还未与充电桩接触,请接触好在加水。")
+                elif self.charge_state.is_waterflooding == True:
                     self.get_logger().info('已经在加水了。')
                 else:
                     send_d = self.send_heartbeat_data.copy()
@@ -274,11 +278,11 @@ class BluetoothChargeServer(Node):
                     send_d[8] = '80'
                     send_d[9] = '00'
                     # 设置数据帧的长度域
-                    send_d[10] = '00'
-                    send_d[11] = '01'
+                    send_d[10] = '02'
+                    send_d[11] = '00'
                     # 设置数据帧的数据域
-                    send_d.append('01')
                     send_d.append('00')
+                    send_d.append('01')
                     # 设置数据帧的校验码
                     send_d.append(self.crc8(send_d))
                     # 设置数据帧的
@@ -299,7 +303,7 @@ class BluetoothChargeServer(Node):
                         else:
                             time.sleep(1)
 
-            elif msgs.data == BluetoothCommand.CHARGER_STOP:
+            elif msgs.command == BluetoothCommand.WATER_STOP:
                 self.get_logger().info('收到停止加水命令')
                 if self.charge_state.is_waterflooding == False:
                     self.get_logger().info('本来就没加水。')
@@ -600,7 +604,21 @@ class BluetoothChargeServer(Node):
                     # now_time = self.get_clock().now()
                     # self.charge_state.stamp = now_time.to_msg()
                 else:
-                    self.get_logger().info('has_contact 数据段数据错误。')  
+                    self.get_logger().info('has_contact 数据段数据错误。')
+                    
+                if data_list[12:-2][7] == '00':
+                    self.charge_state.is_waterflooding = False
+                elif data_list[12:-2][7] == '01':
+                    self.charge_state.is_waterflooding = True
+                else:
+                    self.get_logger().info('is_waterflooding 数据段数据错误。') 
+                    
+                if data_list[12:-2][6] == '00':
+                    self.charge_state.water_mode = "auto"
+                elif data_list[12:-2][6] == '01':
+                    self.charge_state.water_mode = "manual"
+                else:
+                    self.get_logger().info('is_waterflooding 数据段数据错误。')                          
                 
         else:
             # self.get_logger().debug(f'self crc: {crc8_}')

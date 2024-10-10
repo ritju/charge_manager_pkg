@@ -1,5 +1,0 @@
-uint8 time_wait
----
-float64 time_elapse
-bool result
-
