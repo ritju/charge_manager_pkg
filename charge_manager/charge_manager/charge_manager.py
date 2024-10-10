@@ -12,11 +12,11 @@ import time
 import os
 
 from std_srvs.srv import Empty
-from std_msgs.msg import Int8
 from std_msgs.msg import String
 from charge_manager_msgs.action import Charge
 from charge_manager_msgs.msg import ChargeState2
 from charge_manager_msgs.msg import BluetoothStatus
+from charge_manager_msgs.msg import BluetoothCommand
 from charge_manager_msgs.srv import StartBluetooth, StopBluetooth
 from capella_ros_service_interfaces.msg import ChargeState
 from geometry_msgs.msg import Twist
@@ -32,7 +32,7 @@ class chargeManager(Node):
         self.charge_action_client_sendgoal_future = None
 
         callback_group_type = ReentrantCallbackGroup()
-        self.command_publisher = self.create_publisher(Int8, 'bluetooth_command', 1, callback_group=callback_group_type)
+        self.command_publisher = self.create_publisher(BluetoothCommand, 'bluetooth_command', 1, callback_group=callback_group_type)
 
         # init bluetooth params
         self.bluetooth_status = BluetoothStatus.DOWN
@@ -78,6 +78,12 @@ class chargeManager(Node):
         
         # /charger/stop service
         self.charger_stop_service = self.create_service(Empty, '/charger/stop', self.charger_stop_service_callback, callback_group=callback_group_type)
+
+        # /water/start service
+        self.water_start_service = self.create_service(Empty, '/water/start', self.water_start_service_callback, callback_group=callback_group_type)
+
+        # /water/stop service
+        self.water_stop_service = self.create_service(Empty, '/water/stop', self.water_stop_service_callback, callback_group=callback_group_type)
         
         # /charger/start_docking
         self.charger_start_docking_service = self.create_service(Empty, '/charger/start_docking', self.charger_start_docking_service_callback, callback_group=callback_group_type)
@@ -145,15 +151,29 @@ class chargeManager(Node):
     
     def charger_start_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start service')
-        msg = Int8()
-        msg.data = 1
+        msg = BluetoothCommand()
+        msg.command = BluetoothCommand.CHARGER_START
         self.command_publisher.publish(msg)
         return response
 
     def charger_stop_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/stop service')
-        msg = Int8()
-        msg.data = 0
+        msg = BluetoothCommand()
+        msg.command = BluetoothCommand.CHARGER_STOP
+        self.command_publisher.publish(msg)
+        return response
+
+    def water_start_service_callback(self, request, response):
+        self.get_logger().info('received a request for /water/start service')
+        msg = BluetoothCommand()
+        msg.command = BluetoothCommand.WATER_START
+        self.command_publisher.publish(msg)
+        return response
+
+    def water_stop_service_callback(self, request, response):
+        self.get_logger().info('received a request for /water/stop service')
+        msg = BluetoothCommand()
+        msg.command = BluetoothCommand.WATER_STOP
         self.command_publisher.publish(msg)
         return response
 

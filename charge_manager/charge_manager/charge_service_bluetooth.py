@@ -6,7 +6,7 @@ import threading
 import crcmod.predefined
 from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth
 from charge_manager_msgs.msg import ChargeState2
-from std_msgs.msg import Int8
+from charge_manager_msgs.msg import BluetoothCommand
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolicy
 # 蓝牙模块相关的库
@@ -97,7 +97,7 @@ class BluetoothChargeServer(Node):
         self.charge_state_publisher = self.create_publisher(ChargeState2, '/charger/state2', charger_state_qos, callback_group=ReentrantCallbackGroup())
         self.publish_rate = self.create_rate(20)
         # 创建充电服务
-        self.start_stop_charge_server = self.create_subscription(Int8, '/bluetooth_command', self.start_stop_charge_callback, 5, callback_group=ReentrantCallbackGroup())
+        self.start_stop_charge_server = self.create_subscription(BluetoothCommand, '/bluetooth_command', self.start_stop_charge_callback, 5, callback_group=ReentrantCallbackGroup())
         # 接受充电桩的数据帧
         self.udp_data = []
         # 创建线程开始发布充电状态
@@ -187,12 +187,12 @@ class BluetoothChargeServer(Node):
             self.publish_rate.sleep()
 
     def start_stop_charge_callback(self,msgs):
-        if msgs.data == 1:
-            # 开始充电服务回调函数,向充电桩发送开始充电数据帧
-            # 判断是否已经连接上充电桩的蓝牙,没连上无法通讯
-            time.sleep(0.5)
-            self.get_logger().info('收到开始充电命令')
-            if self.charge_state.pid != '':
+        if self.charge_state.pid == '':
+            self.get_logger().info('未连接充电桩bluetooth,请先连接！')
+        else:
+            if msgs.data == BluetoothCommand.CHARGER_START:
+                time.sleep(0.5)
+                self.get_logger().info('收到开始充电命令')
                 # 判断是否还没接触上充电桩，没接触上直接返回失败
                 if self.charge_state.has_contact == False:
                     self.get_logger().info("还未与充电桩接触,请接触好在充电。")
@@ -200,44 +200,40 @@ class BluetoothChargeServer(Node):
                 elif self.charge_state.is_charging == True:
                     self.get_logger().info("早已经在充电了。")
                 # 发送充电数据帧
-                send_d = self.send_heartbeat_data.copy()
-                # 设置数据帧的命令码
-                send_d[8] = '80'
-                send_d[9] = '00'
-                # 设置数据帧的长度域
-                send_d[10] = '02'
-                send_d[11] = '00'
-                # 设置数据帧的数据域
-                send_d.append('02')
-                send_d.append('00')
-                # 设置数据帧的校验码
-                send_d.append(self.crc8(send_d))
-                # 设置数据帧的结束符
-                send_d.append('16')
-                # 发送数据帧
-                self.send_data = bytes.fromhex(''.join(send_d))
-                # # 循环等待充电桩的响应结果
-                t1 = time.time()
-                while True:
-                    if self.charge_state.is_charging == True:
-                        self.get_logger().info('成功开始充电！')
-                        break
-                    elif time.time() - t1 > 10:
-                        self.get_logger().info('开始充电失败！')
-                        break
-                    else:
-                        time.sleep(1)
-                        
-            else:
-                self.get_logger().info('未连接充电桩bluetooth,请先连接！')
-        elif msgs.data == 0:
-            # 停止充电服务回调函数,向充电桩发送停止充电数据帧
-            # 判断是否已经连接上充电桩的蓝牙,没连上无法通讯
-            self.get_logger().info('收到停止充电命令')
-            if self.charge_state.pid != '':
-                    # 判断当前WiFi连接状态
-                    if self.charge_state.is_charging == False:
-                        self.get_logger().info('本来就没充电。')
+                else:
+                    send_d = self.send_heartbeat_data.copy()
+                    # 设置数据帧的命令码
+                    send_d[8] = '80'
+                    send_d[9] = '00'
+                    # 设置数据帧的长度域
+                    send_d[10] = '02'
+                    send_d[11] = '00'
+                    # 设置数据帧的数据域
+                    send_d.append('02')
+                    send_d.append('00')
+                    # 设置数据帧的校验码
+                    send_d.append(self.crc8(send_d))
+                    # 设置数据帧的结束符
+                    send_d.append('16')
+                    # 发送数据帧
+                    self.send_data = bytes.fromhex(''.join(send_d))
+                    # # 循环等待充电桩的响应结果
+                    t1 = time.time()
+                    while True:
+                        if self.charge_state.is_charging == True:
+                            self.get_logger().info('成功开始充电！')
+                            break
+                        elif time.time() - t1 > 10:
+                            self.get_logger().info('开始充电失败！')
+                            break
+                        else:
+                            time.sleep(1)
+
+            elif msgs.data == BluetoothCommand.CHARGER_STOP:
+                self.get_logger().info('收到停止充电命令')
+                if self.charge_state.is_charging == False:
+                    self.get_logger().info('本来就没充电。')
+                else:
                     send_d = self.send_heartbeat_data.copy()
                     # 设置数据帧的命令码
                     send_d[8] = '80'
@@ -267,9 +263,76 @@ class BluetoothChargeServer(Node):
                             break
                         else:
                             time.sleep(1)
-                        
-            else:
-                self.get_logger().info('未连接充电桩WiFi,请先连接！')
+
+            elif msgs.data == BluetoothCommand.WATER_START:
+                self.get_logger().info('收到开始加水命令')
+                if self.charge_state.is_waterflooding == False:
+                    self.get_logger().info('已经在加水了。')
+                else:
+                    send_d = self.send_heartbeat_data.copy()
+                    # 设置数据帧的命令码
+                    send_d[8] = '80'
+                    send_d[9] = '00'
+                    # 设置数据帧的长度域
+                    send_d[10] = '00'
+                    send_d[11] = '01'
+                    # 设置数据帧的数据域
+                    send_d.append('01')
+                    send_d.append('00')
+                    # 设置数据帧的校验码
+                    send_d.append(self.crc8(send_d))
+                    # 设置数据帧的
+                    send_d.append('16')
+                    # 发送数据帧
+                    self.send_data = bytes.fromhex(''.join(send_d))
+                    # 等待充电桩回复
+                    t1 = time.time()
+                    # 循环等待充电桩的响应结果
+                    while True:
+                        if self.charge_state.is_waterflooding == True:
+                            self.get_logger().info('成功开始加水！')
+                            # self.disconnect_bluetooth = True
+                            break
+                        elif time.time() - t1 > 10:
+                            self.get_logger().info('开始加水失败！')
+                            break
+                        else:
+                            time.sleep(1)
+
+            elif msgs.data == BluetoothCommand.CHARGER_STOP:
+                self.get_logger().info('收到停止加水命令')
+                if self.charge_state.is_waterflooding == False:
+                    self.get_logger().info('本来就没加水。')
+                else:
+                    send_d = self.send_heartbeat_data.copy()
+                    # 设置数据帧的命令码
+                    send_d[8] = '80'
+                    send_d[9] = '00'
+                    # 设置数据帧的长度域
+                    send_d[10] = '02'
+                    send_d[11] = '00'
+                    # 设置数据帧的数据域
+                    send_d.append('00')
+                    send_d.append('02')
+                    # 设置数据帧的校验码
+                    send_d.append(self.crc8(send_d))
+                    # 设置数据帧的
+                    send_d.append('16')
+                    # 发送数据帧
+                    self.send_data = bytes.fromhex(''.join(send_d))
+                    # 等待充电桩回复
+                    t1 = time.time()
+                    # 循环等待充电桩的响应结果
+                    while True:
+                        if self.charge_state.is_waterflooding == False:
+                            self.get_logger().info('成功关闭加水！')
+                            # self.disconnect_bluetooth = True
+                            break
+                        elif time.time() - t1 > 10:
+                            self.get_logger().info('关闭加水失败！')
+                            break
+                        else:
+                            time.sleep(1)
 
     # 连接充电桩蓝牙
     def connect_bluetooth(self,request, response):

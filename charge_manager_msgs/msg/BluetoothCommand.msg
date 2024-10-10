@@ -1,0 +1,9 @@
+uint8 CHARGER_START=0
+uint8 CHARGER_STOP=1
+uint8 WARTER_START=2
+uint8 WARTER_STOP=3
+
+uint8 command
+
+
+
