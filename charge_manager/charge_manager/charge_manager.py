@@ -13,7 +13,7 @@ import os
 
 from std_srvs.srv import Empty
 from std_msgs.msg import String
-from std_msgs.msg import UInt8
+from std_msgs.msg import UInt8, Bool
 from charge_manager_msgs.action import Charge
 from charge_manager_msgs.msg import ChargeState2
 from charge_manager_msgs.msg import BluetoothStatus
@@ -62,13 +62,20 @@ class chargeManager(Node):
         charger_state_qos.history = HistoryPolicy.KEEP_LAST
         charger_state_qos.durability = DurabilityPolicy.VOLATILE
 
+        # 订阅蓝牙server发送的 ChargeState2
         charger_state_qos2 = QoSProfile(depth=1)
         charger_state_qos2.reliability = ReliabilityPolicy.RELIABLE
         charger_state_qos2.history = HistoryPolicy.KEEP_LAST
         charger_state_qos2.durability = DurabilityPolicy.VOLATILE
-        # 订阅蓝牙server发送的 ChargeState2
         self.charger_state2_sub_ = self.create_subscription(ChargeState2, '/charger/state2', self.charger_state2_sub_callback, charger_state_qos, callback_group=callback_group_type)
 
+        # 订阅加水控制开关话题
+        add_water_ctr_qos = QoSProfile(depth=1)
+        add_water_ctr_qos.reliability = ReliabilityPolicy.RELIABLE
+        add_water_ctr_qos.history = HistoryPolicy.KEEP_LAST
+        add_water_ctr_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        self.add_water_ctr_sub_ = self.create_subscription(Bool, '/add_water_ctr', self.add_water_ctr_sub_callback, add_water_ctr_qos, callback_group=callback_group_type)
+        
         # 初始化 /charger/state publisher        
         self.charger_state_publisher = self.create_publisher(ChargeState, '/charger/state', charger_state_qos2, callback_group=callback_group_type)
         self.timer_pub_charger_state = self.create_timer(0.05, self.timer_pub_charger_state_callback, callback_group=callback_group_type)
@@ -137,7 +144,6 @@ class chargeManager(Node):
         except Exception as e:
             self.get_logger().info(f'catch exception {str(e)}, when charge_manage node init.')
 
-
       
     def timer_pub_charger_state_callback(self):
         self.charger_state_publisher.publish(self.charger_state)
@@ -173,6 +179,19 @@ class chargeManager(Node):
         self.charger_state.water_mode = msg.water_mode
         if msg.has_contact:
             self.charger_state.is_docking = False
+    
+    def add_water_ctr_sub_callback(self, msg):
+        if msg.data == True:
+            self.get_logger().info(f'received the topic /add_water_ctr with value {msg.data}')
+            msg = BluetoothCommand()
+            msg.command = BluetoothCommand.CHARGER_START
+            self.command_publisher.publish(msg)
+        else:
+            self.get_logger().info(f'received the topic /add_water_ctr with value {msg.data}')
+            msg = BluetoothCommand()
+            msg.command = BluetoothCommand.CHARGER_STOP
+            self.command_publisher.publish(msg)
+            
     
     def charger_id_sub_callback(self, msg):
         if msg.data != '':
