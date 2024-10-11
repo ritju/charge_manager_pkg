@@ -184,12 +184,12 @@ class chargeManager(Node):
         if msg.data == True:
             self.get_logger().info(f'received the topic /add_water_ctr with value {msg.data}')
             msg = BluetoothCommand()
-            msg.command = BluetoothCommand.CHARGER_START
+            msg.command = BluetoothCommand.WATER_START
             self.command_publisher.publish(msg)
         else:
             self.get_logger().info(f'received the topic /add_water_ctr with value {msg.data}')
             msg = BluetoothCommand()
-            msg.command = BluetoothCommand.CHARGER_STOP
+            msg.command = BluetoothCommand.WATER_STOP
             self.command_publisher.publish(msg)
             
     
