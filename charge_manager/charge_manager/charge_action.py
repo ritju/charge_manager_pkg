@@ -236,6 +236,7 @@ class ChargeAction(Node):
             self.dock_executing = True
             self.get_logger().info('-------- call /dock action --------')
             dock_msg = Dock.Goal()
+            dock_msg.mac = self.mac
             while not self.dock_client_.wait_for_server(2):
                 self.get_logger().info('Dock action server not available.', throttle_duration_sec = 2)
             self.dock_client_sendgoal_future = self.dock_client_.send_goal_async(dock_msg, self.dock_feedback_callback)
