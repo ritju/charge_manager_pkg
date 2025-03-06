@@ -164,15 +164,18 @@ class BluetoothChargeServer(Node):
                 self.charge_state.pid = ''
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
+                self.charge_state.is_waterflooding = False
             try:
                 if not self.bleak_client.is_connected:
                     self.charge_state.pid = ''
                     self.charge_state.has_contact = False
                     self.charge_state.is_charging = False
+                    self.charge_state.is_waterflooding = False
             except:
                 self.charge_state.pid = ''
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
+                self.charge_state.is_waterflooding = False
             self.charge_state_publisher.publish(self.charge_state)
             if self.contact_state_last_ != self.charge_state.has_contact:
                 self.get_logger().info(f"bluetooth => contact state change from {str(self.contact_state_last_)} to {str(self.charge_state.has_contact)}")
@@ -182,6 +185,9 @@ class BluetoothChargeServer(Node):
                 self.get_logger().info(f"current_time: {time.time()}")
                 self.get_logger().info(f"heartbeat_time: {self.heartbeat_time}")
                 self.charge_state.pid = ''
+                self.charge_state.has_contact = False
+                self.charge_state.is_charging = False
+                self.charge_state.is_waterflooding = False
                 self.disconnect_bluetooth = True
                 self.bluetooth_connected = None
                 self.heartbeat_time = 0
