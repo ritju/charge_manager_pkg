@@ -1,6 +1,14 @@
 from setuptools import find_packages, setup
+import os
 
 package_name = 'charge_manager'
+
+# 自动获取restore目录下所有txt文件
+restore_files = []
+for root, dirs, files in os.walk('restore'):
+    for file in files:
+        if file.endswith('.txt'):
+            restore_files.append(os.path.join(root, file))
 
 setup(
     name=package_name,
@@ -10,6 +18,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+         # 动态添加restore文件夹下的所有txt文件
+        ('share/' + package_name + '/restore', restore_files),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
