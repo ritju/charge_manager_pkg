@@ -24,6 +24,7 @@ from bleak.assigned_numbers import AdvertisementDataType
 from bleak.backends.bluezdbus.advertisement_monitor import OrPattern
 from bleak.backends.bluezdbus.scanner import BlueZScannerArgs
 from bleak.backends.device import BLEDevice
+import fcntl
 
 
 # 需要实现的功能:
@@ -344,6 +345,30 @@ class BluetoothChargeServer(Node):
                         else:
                             time.sleep(1)
 
+    def wait_and_read(self, file_path, max_attempts=10, interval=1):
+        """
+        等待文件空闲后读取内容
+        :param file_path: 文件路径
+        :param max_attempts: 最大尝试次数
+        :param interval: 重试间隔(秒)
+        :return: 文件内容或None(失败时)
+        """
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                # 非阻塞式文件锁检测
+                with open(file_path, 'r') as f:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    content = f.read()
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    self.get_logger().info(f'content of {file_path}: {content}')
+                    return content
+            except (IOError, BlockingIOError):
+                time.sleep(interval)
+                attempts += 1
+                self.get_logger().info(f'file {file_path} is busing, just wait {interval} second ......')
+        return None
+    
     # 连接充电桩蓝牙
     def connect_bluetooth(self,request, response):
         self.get_logger().info("Received a request for connect bluetooth")
@@ -357,15 +382,17 @@ class BluetoothChargeServer(Node):
         #     number = number -1
 
         restore = 0 # 蓝牙是否正在恢复中
-        with open('/map/bluetooth_restore.txt', 'r', encoding='utf-8') as f:
-            restore = (int)(f.readline().strip('\n'))
-            self.get_logger().info(f'restore: {restore}')
+        restore = (int)(self.wait_and_read('/map/bluetooth_restore.txt'))
+        # with open('/map/bluetooth_restore.txt', 'r', encoding='utf-8') as f:
+        #     restore = (int)(f.readline().strip('\n'))
+        #     self.get_logger().info(f'restore: {restore}')
         time_wait = time.time()
         while restore  and (time.time() - time_wait) < 25.0:
             self.get_logger().info("Waiting for bluetooth restoring ......")
             time.sleep(2)
-            with open('/map/bluetooth_restore.txt', 'r', encoding='utf-8') as f:
-                restore = (int)(f.readline().strip('\n'))
+            restore = (int)(self.wait_and_read('/map/bluetooth_restore.txt'))
+            # with open('/map/bluetooth_restore.txt', 'r', encoding='utf-8') as f:
+            #     restore = (int)(f.readline().strip('\n'))
         self.get_logger().info("正在重连蓝牙...")
         self.heartbeat_time = 0
         self.connect_start_time = time.time()
