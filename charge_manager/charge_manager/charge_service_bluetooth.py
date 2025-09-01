@@ -363,6 +363,7 @@ class BluetoothChargeServer(Node):
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                     self.get_logger().info(f'content of {file_path}: {content}')
                     if content == "":
+                        self.get_logger().info(f'content is empty')
                         time.sleep(interval)
                         attempts += 1
                     else:
