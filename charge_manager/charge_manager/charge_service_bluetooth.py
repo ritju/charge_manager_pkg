@@ -362,7 +362,11 @@ class BluetoothChargeServer(Node):
                     content = f.read()
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                     self.get_logger().info(f'content of {file_path}: {content}')
-                    return content
+                    if content == "":
+                        time.sleep(interval)
+                        attempts += 1
+                    else:
+                     return content
             except (IOError, BlockingIOError):
                 time.sleep(interval)
                 attempts += 1
