@@ -78,6 +78,7 @@ class BluetoothChargeServer(Node):
         self.heartbeat_time = 0
         # 是否断开蓝牙的属性
         self.disconnect_bluetooth = False
+        self.bluetooth_found = False
 
         # 通过bssid链接充电桩WIFI服务
         self.bluetooth_concact_server = self.create_service(ConnectBluetooth, '/connect_bluetooth', self.connect_bluetooth, callback_group=ReentrantCallbackGroup())
@@ -392,6 +393,7 @@ class BluetoothChargeServer(Node):
         #     restore = (int)(f.readline().strip('\n'))
         #     self.get_logger().info(f'restore: {restore}')
         time_wait = time.time()
+        # restore = 0
         while restore  and (time.time() - time_wait) < 25.0:
             self.get_logger().info("Waiting for bluetooth restoring ......")
             time.sleep(2)
@@ -419,7 +421,7 @@ class BluetoothChargeServer(Node):
         # 等待蓝牙连接结果
         start_time = time.time()
         while True:
-            if self.bluetooth_connected != None:
+            if self.bluetooth_connected != None or not self.bluetooth_found:
                 break
             elif time.time() - start_time > 25:
                 self.get_logger().info(f"连接蓝牙超时: {request.mac} ......")
@@ -464,13 +466,13 @@ class BluetoothChargeServer(Node):
             devices = await BleakScanner(scanning_mode='active').discover(return_adv=True)
             devices_num = len(devices)
             self.get_logger().info(f'共搜索到 {devices_num} 个蓝牙信号。')
-            self.bluetooth_searched = False
+            self.bluetooth_found = False
             if devices_num > 0:
                 self.get_logger().info('--------Mac-------- | --------Name-------')
                 for key in devices:
                     self.get_logger().info(f'{key}   | {devices[key][1].local_name}')
                     if key == address:
-                        self.bluetooth_searched = True
+                        self.bluetooth_found = True
                         self.ble_device = devices[key][0]
                         
             else:
@@ -485,7 +487,7 @@ class BluetoothChargeServer(Node):
                 pass
             
             
-            if self.bluetooth_searched:
+            if self.bluetooth_found:
                 self.get_logger().info(f'搜索到mac: {address}')
                 self.get_logger().info(f'address: {self.ble_device.address}')
                 self.get_logger().info(f'name: {self.ble_device.name}')
@@ -510,7 +512,7 @@ class BluetoothChargeServer(Node):
                         
             self.uuid_write = None
             self.uuid_notify = None
-            if self.bluetooth_searched:
+            if self.bluetooth_found:
                 self.bleak_client = BleakClient(self.ble_device)
             else:
                 self.bleak_client = BleakClient(address)
