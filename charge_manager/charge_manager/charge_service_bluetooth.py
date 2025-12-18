@@ -154,6 +154,24 @@ class BluetoothChargeServer(Node):
         else:
             self.get_logger().info(f'Terminate parent (pid: {parent.pid}) success. rt_code: {rt_code}')
 
+    def assign_default_msg(self, ):
+        self.charge_state.pid = ''
+        self.charge_state.has_contact = False
+        self.charge_state.is_charging = False
+        self.charge_state.is_waterflooding = False
+        self.charge_state.water_mode = "unknow"
+        self.charge_state.bit0 = -1
+        self.charge_state.bit1 = -1
+        self.charge_state.bit2 = -1
+        self.charge_state.bit3 = -1
+        self.charge_state.bit4 = -1
+        self.charge_state.bit5 = -1
+        self.charge_state.bit6 = -1
+        self.charge_state.bit7 = -1
+        self.charge_state.left_sensor_dis = -1
+        self.charge_state.right_sensor_dis = -1
+        self.charge_state.switch_stu = -1
+
     # 定时发布充电状态
     def charge_state_pub(self, ):
         self.get_logger().info(f'charger_state_pub thread => Process: {os.getpid()}, Thread: {threading.get_ident()}')
@@ -161,21 +179,12 @@ class BluetoothChargeServer(Node):
             if not rclpy.ok():
                  self.get_logger().info('rclpy\'s context is invalid, exiting...')
             if self.charge_state.pid == '':
-                self.charge_state.pid = ''
-                self.charge_state.has_contact = False
-                self.charge_state.is_charging = False
-                self.charge_state.is_waterflooding = False
+                self.assign_default_msg()
             try:
                 if not self.bleak_client.is_connected:
-                    self.charge_state.pid = ''
-                    self.charge_state.has_contact = False
-                    self.charge_state.is_charging = False
-                    self.charge_state.is_waterflooding = False
+                    self.assign_default_msg()
             except:
-                self.charge_state.pid = ''
-                self.charge_state.has_contact = False
-                self.charge_state.is_charging = False
-                self.charge_state.is_waterflooding = False
+                self.assign_default_msg()
             self.charge_state_publisher.publish(self.charge_state)
             if self.contact_state_last_ != self.charge_state.has_contact:
                 self.get_logger().info(f"bluetooth => contact state change from {str(self.contact_state_last_)} to {str(self.charge_state.has_contact)}")
@@ -624,7 +633,37 @@ class BluetoothChargeServer(Node):
                 elif data_list[12:-2][6] == '01':
                     self.charge_state.water_mode = "manual"
                 else:
-                    self.get_logger().info('is_waterflooding 数据段数据错误。')                          
+                    self.get_logger().info('is_waterflooding 数据段数据错误。')      
+
+                failure_status = data_list[12:-2][8]
+                failure_status = int(failure_status[0])  << 4 + int(failure_status[1])
+                self.charge_state.bit0 = (failure_status >> 0) & 1
+                self.charge_state.bit1 = (failure_status >> 1) & 1
+                self.charge_state.bit2 = (failure_status >> 2) & 1
+                self.charge_state.bit3 = (failure_status >> 3) & 1
+                self.charge_state.bit4 = (failure_status >> 4) & 1
+                self.charge_state.bit5 = (failure_status >> 5) & 1
+                self.charge_state.bit6 = (failure_status >> 6) & 1
+                self.charge_state.bit7 = (failure_status >> 7) & 1
+
+                dis_left_low = data_list[12:-2][9]
+                dis_left_high = data_list[12:-2][10]
+                dis_left_low = int(dis_left_low[0])  << 4 + int(dis_left_low[1])
+                dis_left_high = int(dis_left_high[0])  << 4 + int(dis_left_high[1])
+                dis_left = dis_left_high  << 8 + dis_left_low
+                self.charge_state.left_sensor_dis = dis_left
+
+                dis_right_low = data_list[12:-2][11]
+                dis_right_high = data_list[12:-2][12]
+                dis_right_low = int(dis_right_low[0])  << 4 + int(dis_right_low[1])
+                dis_right_high = int(dis_right_high[0])  << 4 + int(dis_right_high[1])
+                dis_right = dis_right_high  << 8 + dis_right_low
+                self.charge_state.right_sensor_dis = dis_right
+                
+                if data_list[12:-2][13] == "00":
+                    self.charge_state.switch_stu = 0
+                else:
+                    self.charge_state.switch_stu = 1                                 
                 
         else:
             # self.get_logger().debug(f'self crc: {crc8_}')
