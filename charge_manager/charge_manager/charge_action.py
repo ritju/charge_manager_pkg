@@ -407,7 +407,7 @@ class ChargeAction(Node):
                 if self.dock_goal_rejected:
                     self.get_logger().info("dock action reject => stop loop.")
                     break
-                continue
+                # continue
             time.sleep(1)
 
     
