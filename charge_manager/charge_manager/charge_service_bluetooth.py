@@ -64,6 +64,15 @@ import fcntl
 class BluetoothChargeServer(Node):
     def __init__(self, name):
         super().__init__(name)
+        # 是否启用了蓝牙恢复服务
+        self.declare_parameter("use_bluetooth_restore_service", "True")
+        self.use_bluetooth_restore_service = self.get_parameter("use_bluetooth_restore_service").get_parameter_value().string_value.strip().lower()
+        if self.use_bluetooth_restore_service in ('true', 'yes', 'on', '1', 't', 'y', 'enabled'):
+            self.get_logger().info('use_bluetooth_restore_service: True')
+            self.use_bluetooth_restore_service = True
+        else:
+            self.get_logger().info('use_bluetooth_restore_service: False')
+            self.use_bluetooth_restore_service = False
         # 是否断开与充电桩的蓝牙连接
         self.bluetooth_connected = False
         # 蓝牙数据notify的uuid
@@ -394,7 +403,7 @@ class BluetoothChargeServer(Node):
         #     self.get_logger().info(f'restore: {restore}')
         time_wait = time.time()
         # restore = 0
-        while restore  and (time.time() - time_wait) < 25.0:
+        while self.use_bluetooth_restore_service and restore  and (time.time() - time_wait) < 25.0:
             self.get_logger().info("Waiting for bluetooth restoring ......")
             time.sleep(2)
             restore = (int)(self.wait_and_read('/map/bluetooth_restore.txt'))
