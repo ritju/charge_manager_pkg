@@ -65,7 +65,7 @@ class BluetoothChargeServer(Node):
     def __init__(self, name):
         super().__init__(name)
         # 是否启用了蓝牙恢复服务
-        self.declare_parameter("use_bluetooth_restore_service", "True")
+        self.declare_parameter("use_bluetooth_restore_service", "False")
         self.use_bluetooth_restore_service = self.get_parameter("use_bluetooth_restore_service").get_parameter_value().string_value.strip().lower()
         if self.use_bluetooth_restore_service in ('true', 'yes', 'on', '1', 't', 'y', 'enabled'):
             self.get_logger().info('use_bluetooth_restore_service: True')
