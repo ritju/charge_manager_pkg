@@ -22,8 +22,7 @@ from std_srvs.srv import Empty as EmptyForSrv
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 from capella_ros_msg.msg import Velocities
-
-sigint_received = 0
+from capella_ros_service_interfaces.srv import StartDetectApriltag, StopDetectApriltag
 
 class ChargeActionState():
     idle = 'idle'
@@ -43,14 +42,11 @@ class ChargeAction(Node):
         super().__init__('charge_action_server')
         self.get_logger().info('*** charge action ***     started.')
         self.battery_ = 0.0
-        self.bluetooth_rebooting_num = -1
-        self.bluetooth_rebooting_num_last = -1
         self.bluetooth_setup = False
         self.bluetooth_reboot_requested = True
         self.charger_position_bool = False
         self.bluetooth_state_stored = False
         self.core_monitor_state_stored = False
-        self.bluetooth_node_stopped = True
         
         self.msg_state_pub = Bool()
         self.msg_state_pub.data = False
@@ -98,6 +94,12 @@ class ChargeAction(Node):
 
         # 创建断开蓝牙连接的客户端
         self.disconnect_bluetooth_client_ = self.create_client(DisconnectBluetooth, 'disconnect_bluetooth', callback_group=self.cb_group)
+
+        # 创建启动apriltag检测的客户端
+        self.start_apriltag_client_ = self.create_client(StartDetectApriltag, 'start_detect_apriltag', callback_group=self.cb_group)
+
+        # 创建停止apriltag检测的客户端
+        self.stop_apriltag_client_ = self.create_client(StopDetectApriltag, 'stop_detect_apriltag', callback_group=self.cb_group)
         
         # 创建对接充电桩的客户端
         self.dock_client_ = ActionClient(self, Dock, "dock", callback_group=self.cb_group)
@@ -130,17 +132,15 @@ class ChargeAction(Node):
         self.bluetooth_connected = False
         self.future_connect_bluetooth = None
         self.future_disconnect_bluetooth = None
-        self.bluetooth_rebooting = False
         self.bluetooth_connected_time = 0.0
-        # self.bluetooth_node_stopped = True # fix bug for stopping bluetooth failed(request bluetooth/start before bluetooth/stop completed.)
-        if self.connect_bluetooth_client_.wait_for_service(2):
-            self.bluetooth_node_stopped = False
-            self.bluetooth_setup = True
-            self.get_logger().info('bluetooth server is on line')
-        else:
-            self.bluetooth_node_stopped = True
-            self.bluetooth_setup = False
-            self.get_logger().info('bluetooth server is off line')
+
+        # apriltag相关参数
+        self.apriltag_detecting = False
+        self.start_apriltag_detecting_executing = False
+        self.stop_apriltag_detecting_executing = False
+        self.future_start_apriltag = None
+        self.future_stop_apriltag = None
+
         self.bluetooth_state_stored = False
         self.core_monitor_state_stored = False
 
@@ -191,37 +191,24 @@ class ChargeAction(Node):
         else:
             pass
 
-    def timer_loop_callback(self):
-        # self.get_logger().info(f'setup: {self.bluetooth_setup}, requested: {self.bluetooth_reboot_requested}, stopped: {self.bluetooth_node_stopped}, stop_loop: {self.stop_loop}', throttle_duration_sec = 3)
-        # if not self.bluetooth_setup and self.bluetooth_reboot_requested and self.bluetooth_node_stopped and not self.stop_loop:
-        #     self.get_logger().info('setup bluetooth server node ......')
-        #     # self.get_logger().info(f'self.stop_loop: {"True" if self.stop_loop else "False"}')
-        #     if self.bluetooth_start_client_.wait_for_service(1):
-        #         self.bluetooth_reboot_requested = False
-        #         self.connect_bluetooth_executing = False
-        #         self.bluetooth_rebooting_num += 1
-        #         self.get_logger().info(f'-------- call /bluetooth/start service --------')
-        #         self.bluetooth_start_future = self.bluetooth_start_client_.call_async(StartBluetooth.Request())
-        #         self.bluetooth_start_future.add_done_callback(self.bluetooth_start_future_done_callback)
-        #     else:
-        #         self.get_logger().info('bluetooth/start service not on line, waiting', throttle_duration_sec = 5)
-
-        # if self.bluetooth_rebooting_num_last != self.bluetooth_rebooting_num:
-        #     self.get_logger().info(f'bluetooth server node reboot numbers: {self.bluetooth_rebooting_num}.')
-        #     self.bluetooth_rebooting_num_last = self.bluetooth_rebooting_num
-                
-        # self.get_logger().info(f'connected: {self.bluetooth_connected}, connect_bluetooth_executing: {self.connect_bluetooth_executing}, setup: {self.bluetooth_setup}', throttle_duration_sec=10)
-        
+    def timer_loop_callback(self):        
         if self.connect_bluetooth_client_.wait_for_service(2):
             self.bluetooth_setup = True
         else:
             self.bluetooth_setup = False
         
+        if not self.apriltag_detecting and not self.dock_completed and not self.stop_loop and not self.start_apriltag_detecting_executing:
+            self.get_logger().info('-------- call /start_detect_apriltag service --------')
+            self.start_apriltag_detecting_executing = True
+            request = StartDetectApriltag.Request()
+            self.future_start_apriltag = self.start_apriltag_client_.call_async(request)
+            self.future_start_apriltag.add_done_callback(self.start_apriltag_detect_future_done_callback)
+
         if self.bluetooth_setup:
-            if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.bluetooth_rebooting and not self.stop_loop: # do not connect bluetooth when rebooting bluetooth server
+            if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.stop_loop: # do not connect bluetooth when rebooting bluetooth server
                 self.connect_bluetooth_executing = True
                 self.get_logger().info(f"-------- call /connect_bluetooth service, {self.bluetooth_connect_num + 1} / {self.bluetooth_connect_num_max} --------")
-                # self.get_logger().info(f'self.stop_loop: {"True" if self.stop_loop else "False"}')
+
                 request = ConnectBluetooth.Request()
                 request.mac = self.mac
                 self.get_logger().info(f'request.mac {request.mac}')
@@ -260,7 +247,35 @@ class ChargeAction(Node):
             self.feedback_msg.state = ChargeActionState.charging
         # self.get_logger().info(f"=== charge action ===      state: {self.feedback_msg.state}", throttle_duration_sec=1)
         self.goal_handle.publish_feedback(self.feedback_msg)
+    
+        # 停止检测apriltag，对接完成后就停止检测apriltag
+        if self.dock_completed and self.apriltag_detecting and not self.stop_apriltag_detecting_executing:
+            self.get_logger().info('-------- call /stop_detect_apriltag service --------')
+            self.stop_apriltag_detecting_executing = True
+            request = StopDetectApriltag.Request()
+            future_stop_apriltag = self.stop_apriltag_client_.call_async(request)
+            future_stop_apriltag.add_done_callback(self.stop_apriltag_detect_future_done_callback)
         
+
+    def start_apriltag_detect_future_done_callback(self, future):
+        response = future.result()
+        if response.success:
+            self.get_logger().info('start_detect_apriltag service result: success.')
+            self.apriltag_detecting = True
+        else:
+            self.get_logger().info('start_detect_apriltag service result: failed.')
+            self.apriltag_detecting = False
+        self.start_apriltag_detecting_executing = False
+    
+    def stop_apriltag_detect_future_done_callback(self, future):
+        response = future.result()
+        if response.success:
+            self.get_logger().info('stop_detect_apriltag service result: success.')
+            self.apriltag_detecting = False
+        else:
+            self.get_logger().info('stop_detect_apriltag service result: failed.')
+            self.apriltag_detecting = True        
+        self.stop_apriltag_detecting_executing = False
 
     # charge_action goal_callback
     def charge_action_goal_callback(self, goal_request):
@@ -278,8 +293,6 @@ class ChargeAction(Node):
             return GoalResponse.REJECT
         else:
             self.mac = goal_request.mac
-            self.bluetooth_rebooting_num = -1
-            self.bluetooth_rebooting_num_last = -1
             self.get_logger().info('charge_action_goal_callback')
             self.get_logger().info(f'self.mac: {self.mac}')
             self.msg_state_pub.data = True            
@@ -320,10 +333,6 @@ class ChargeAction(Node):
         self.loop_thread.start()
 
         while True:
-            # if self.goal_handle and sigint_received:
-            #     self.get_logger().info(f'received a SIGINT signal when executing /charge action, aborting ......')
-            #     self.goal_handle.abort()
-
             if self.dock_goal_rejected:
                 self.get_logger().info("return Charge action for reason: dock action is rejected.")
                 result = Charge.Result()
@@ -395,12 +404,11 @@ class ChargeAction(Node):
             
     def loop_(self):
         self.get_logger().info('loop started')
-        # self.timer_loop = self.create_timer(0.2, self.timer_loop_callback, self.cb_group)
         while True:
             self.timer_loop_callback()
             if self.dock_completed:
                 if self.battery_ >= 1.01 or self.stop_loop or not self.charger_position_bool:
-                    self.get_logger().info("break timer_loop_callback")
+                    self.get_logger().info("break loop_")
                     self.get_logger().info(f"battery: {self.battery_}, stop_loop: {str(self.stop_loop)}, charge_position_bool: {str(self.charger_position_bool)}")
                     break
             else:
@@ -421,6 +429,11 @@ class ChargeAction(Node):
             goal_handle.cancel_goal_async()
             self.get_logger().info('cancel dock action')
             self.dock_executing = True
+        if self.apriltag_detecting:
+            request = StopDetectApriltag.Request()
+            future_stop_apriltag = self.stop_apriltag_client_.call_async(request)
+            future_stop_apriltag.add_done_callback(self.stop_apriltag_detect_future_done_callback)
+            self.get_logger().info('cancel apriltag detecting by calling /stop_detect_apriltag service')
         return CancelResponse.ACCEPT
 
     def connect_bluetooth_done_callback(self, future_connect_bluetooth):
@@ -429,20 +442,7 @@ class ChargeAction(Node):
         self.bluetooth_connected = response.success
         self.bluetooth_connected_time = time.time()
         if response.success:
-            self.bluetooth_connect_num = 0
-            self.bluetooth_rebooting_num = -1
-            self.bluetooth_rebooting_num_last = -1
-        
-        # if self.bluetooth_connect_num >= self.bluetooth_connect_num_max and not response.success:
-        #     num_old = self.bluetooth_connect_num
-        #     self.bluetooth_connect_num = 0
-        #     self.bluetooth_reboot_requested = True
-        #     self.bluetooth_rebooting = True
-        #     # self.bluetooth_setup = False #fix bug for stopping bluetooth failed(request bluetooth/start before bluetooth/stop completed.)
-        #     # self.get_logger().info(f'bluetooth_connect_num is {num_old} >= {self.bluetooth_connect_num_max}, reboot bluetooth server node')
-        #     self.get_logger().info('-------- call /bluetooth/stop service --------')
-        #     self.bluetooth_stop_future = self.bluetooth_stop_client_.call_async(StopBluetooth.Request())
-        #     self.bluetooth_stop_future.add_done_callback(self.bluetooth_stop_future_done_callback)      
+            self.bluetooth_connect_num = 0    
             
         self.connect_bluetooth_executing = False
     
@@ -477,41 +477,8 @@ class ChargeAction(Node):
             self.stop_loop = True
         self.dock_executing = False
         self.dock_completed = True
-    
-    def bluetooth_stop_future_done_callback(self, future):
-        response = future.result()
-        if response.success:
-            self.get_logger().info('bluetooth/stop service result: success.')
-            self.get_logger().info(f'infos: {response.infos}')
-            self.bluetooth_setup = False
-            self.bluetooth_node_stopped = True
-        else:
-            self.get_logger().info('bluetooth/stop service result: failed.')
-            self.get_logger().warn(f'infos: {response.infos}')
-            self.get_logger().info(f'cost_time: {response.cost_time} seconds.')
-
-
-    def bluetooth_start_future_done_callback(self, future):
-        response = future.result()
-        if response.success:
-            self.get_logger().info('bluetooth/start service result: success.')
-            self.get_logger().info(f'infos: {response.infos}')
-            self.get_logger().info(f'cost_time: {response.cost_time} seconds.')
-            self.bluetooth_setup = True
-            self.bluetooth_node_stopped = False
-            self.bluetooth_rebooting = False
-        else:
-            self.get_logger().info('bluetooth/start service result: failed.')
-            self.get_logger().warn(f'infos: {response.infos}')
-            self.bluetooth_rebooting = False
-
-def sigint_handle(signal, frame):
-    sigint_received = 1
-    print('************ received a SIGINT signal ************')
-    time.sleep(5)
 
 def main(args=None):
-    # signal.signal(signal.SIGINT, sigint_handle)
     rclpy.init(args=args)
     charge_action_node = ChargeAction()
     multi_executor = MultiThreadedExecutor()
