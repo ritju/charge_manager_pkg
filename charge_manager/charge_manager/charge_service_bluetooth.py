@@ -84,20 +84,36 @@ class BluetoothChargeServer(Node):
     def disconnect_bluetooth_callback(self, request, response):
         start_time = time.time()
         self.get_logger().info('received a request for /disconnect_bluetooth')
+        
+        # 1. 设置标志，防止协程继续发送数据
         self.disconnect_bluetooth = True
+        
+        # 2. 主动断开正在运行的 BLE 任务
+        with self._client_lock:
+            client = self._client
+        if client is not None and client.is_connected:
+            try:
+                # 在事件循环中执行断开
+                future = asyncio.run_coroutine_threadsafe(client.disconnect(), self.loop)
+                future.result(timeout=3.0)  # 等待断开完成
+            except Exception as e:
+                self.get_logger().info(f'主动断开异常: {e}')
+        
+        # 3. 取消正在进行的连接/通信协程
+        if self._ble_task and not self._ble_task.done():
+            self._ble_task.cancel()
+            try:
+                self._ble_task.result(timeout=2.0)
+            except Exception as e:
+                self.get_logger().info(f'取消正在进行的连接/通信协程异常: {e}')
+        
+        # 4. 强制清空状态（避免残留）
+        self.charge_state.pid = ''
+        self.bluetooth_connected = False
+        self.heartbeat_time = 0
+        
         response.success = True
-        response.infos = '断开蓝牙连接服务响应成功。'
-        while self.charge_state.pid != '':
-            if time.time() - start_time > 10.0:
-                response.success = False
-                response.infos = '断开蓝牙连接服务响应超时（10s）。'
-                break
-            else:
-                self.get_logger().info('等待蓝牙连接服务断开中......', throttle_duration_sec=1)
-                time.sleep(0.1)
-        if self.charge_state.pid == '':
-            self.heartbeat_time = 0
-            self.get_logger().info('断开蓝牙连接服务响应成功。')
+        response.infos = '断开蓝牙连接成功。'
         response.cost_time = round(time.time() - start_time, 1)
         return response
 
