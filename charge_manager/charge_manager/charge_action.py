@@ -17,12 +17,12 @@ from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth, Start
 from charge_manager_msgs.action import Charge
 from capella_ros_dock_msgs.action import Dock
 from capella_ros_msg.msg import Battery
-from capella_ros_service_interfaces.msg import ChargeState
+from capella_ros_service_interfaces.msg import ChargeState, RgbCameraResolution
 from std_srvs.srv import Empty as EmptyForSrv
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 from capella_ros_msg.msg import Velocities
-from capella_ros_service_interfaces.srv import StartDetectApriltag, StopDetectApriltag
+from capella_ros_service_interfaces.srv import StartDetectApriltag, StopDetectApriltag, SwitchResolution
 
 class ChargeActionState():
     idle = 'idle'
@@ -101,6 +101,9 @@ class ChargeAction(Node):
         # 创建停止apriltag检测的客户端
         self.stop_apriltag_client_ = self.create_client(StopDetectApriltag, 'stop_detect_apriltag', callback_group=self.cb_group)
         
+        # 创建切换 rgb_camera_back resolution 客户端
+        self.switch_resolution_client_ = self.create_client(SwitchResolution, '/rgb_camera_manager_server/switch_resolution', callback_group=self.cb_group)
+        
         # 创建对接充电桩的客户端
         self.dock_client_ = ActionClient(self, Dock, "dock", callback_group=self.cb_group)
 
@@ -140,6 +143,11 @@ class ChargeAction(Node):
         self.stop_apriltag_detecting_executing = False
         self.future_start_apriltag = None
         self.future_stop_apriltag = None
+        
+        # switch_resolution 相关参数
+        self.resolution_high = False
+        self.switch_resolution_executing = False
+        self.future_switch_resolution = None
 
         self.bluetooth_state_stored = False
         self.core_monitor_state_stored = False
@@ -196,6 +204,15 @@ class ChargeAction(Node):
             self.bluetooth_setup = True
         else:
             self.bluetooth_setup = False
+        
+        # switch resolution to 1280x1024
+        if not self.resolution_high and not self.dock_completed and not self.stop_loop and not self.switch_resolution_executing:
+            self.get_logger().info('-------- call /rgb_camera_manager_server/switch_resolution service with resolution:1280x1024 --------')
+            self.switch_resolution_executing = True
+            request = SwitchResolution.Request()
+            request.resolution_mode = SwitchResolution.Request.RESOLUTION_HIGH
+            self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
+            self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
         
         if not self.apriltag_detecting and not self.dock_completed and not self.stop_loop and not self.start_apriltag_detecting_executing:
             self.get_logger().info('-------- call /start_detect_apriltag service --------')
@@ -255,7 +272,6 @@ class ChargeAction(Node):
             request = StopDetectApriltag.Request()
             future_stop_apriltag = self.stop_apriltag_client_.call_async(request)
             future_stop_apriltag.add_done_callback(self.stop_apriltag_detect_future_done_callback)
-        
 
     def start_apriltag_detect_future_done_callback(self, future):
         response = future.result()
@@ -276,6 +292,15 @@ class ChargeAction(Node):
             self.get_logger().info('stop_detect_apriltag service result: failed.')
             self.apriltag_detecting = True        
         self.stop_apriltag_detecting_executing = False
+        
+    def switch_resolution_future_done_callback(self, future):
+        response = future.result()
+        if response.success:
+            self.get_logger().info(f'switch resolution mode to {response.resolution_mode} success.')
+        else:
+            self.get_logger().info(f'switch resolution mode to {response.resolution_mode} failed.')
+        self.resolution_high = True if response.resolution_mode == RgbCameraResolution.RESOLUTION_HIGH else False
+        self.switch_resolution_executing = False
 
     # charge_action goal_callback
     def charge_action_goal_callback(self, goal_request):
@@ -410,6 +435,14 @@ class ChargeAction(Node):
                 if self.battery_ >= 1.01 or self.stop_loop or not self.charger_position_bool:
                     self.get_logger().info("break loop_")
                     self.get_logger().info(f"battery: {self.battery_}, stop_loop: {str(self.stop_loop)}, charge_position_bool: {str(self.charger_position_bool)}")
+                    # switch resolution to 640x480
+                    if self.resolution_high and not self.switch_resolution_executing:
+                        self.get_logger().info('-------- call /rgb_camera_manager_server/switch_resolution service with resolution:640x480 --------')
+                        self.switch_resolution_executing = True
+                        request = SwitchResolution.Request()
+                        request.resolution_mode = SwitchResolution.Request.RESOLUTION_LOW
+                        self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
+                        self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
                     break
             else:
                 if self.dock_goal_rejected:
@@ -430,10 +463,21 @@ class ChargeAction(Node):
             self.get_logger().info('cancel dock action')
             self.dock_executing = True
         if self.apriltag_detecting:
+            self.get_logger().info('-------- call /stop_detect_apriltag service --------')
             request = StopDetectApriltag.Request()
             future_stop_apriltag = self.stop_apriltag_client_.call_async(request)
             future_stop_apriltag.add_done_callback(self.stop_apriltag_detect_future_done_callback)
             self.get_logger().info('cancel apriltag detecting by calling /stop_detect_apriltag service')
+        
+        # switch resolution to 640x480
+        if self.resolution_high and not self.switch_resolution_executing:
+            self.get_logger().info('-------- call /rgb_camera_manager_server/switch_resolution service with resolution:640x480 --------')
+            self.switch_resolution_executing = True
+            request = SwitchResolution.Request()
+            request.resolution_mode = SwitchResolution.Request.RESOLUTION_LOW
+            self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
+            self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
+        
         return CancelResponse.ACCEPT
 
     def connect_bluetooth_done_callback(self, future_connect_bluetooth):
@@ -477,6 +521,15 @@ class ChargeAction(Node):
             self.stop_loop = True
         self.dock_executing = False
         self.dock_completed = True
+        
+        # switch resolution to 640x480
+        if self.dock_completed and self.resolution_high and not self.switch_resolution_executing:
+            self.get_logger().info('-------- call /rgb_camera_manager_server/switch_resolution service with resolution:640x480 --------')
+            self.switch_resolution_executing = True
+            request = SwitchResolution.Request()
+            request.resolution_mode = SwitchResolution.Request.RESOLUTION_LOW
+            self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
+            self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
 
 def main(args=None):
     rclpy.init(args=args)
