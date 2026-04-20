@@ -264,14 +264,6 @@ class ChargeAction(Node):
             self.feedback_msg.state = ChargeActionState.charging
         # self.get_logger().info(f"=== charge action ===      state: {self.feedback_msg.state}", throttle_duration_sec=1)
         self.goal_handle.publish_feedback(self.feedback_msg)
-    
-        # 停止检测apriltag，对接完成后就停止检测apriltag
-        if self.dock_completed and self.apriltag_detecting and not self.stop_apriltag_detecting_executing:
-            self.get_logger().info('-------- call /stop_detect_apriltag service --------')
-            self.stop_apriltag_detecting_executing = True
-            request = StopDetectApriltag.Request()
-            future_stop_apriltag = self.stop_apriltag_client_.call_async(request)
-            future_stop_apriltag.add_done_callback(self.stop_apriltag_detect_future_done_callback)
 
     def start_apriltag_detect_future_done_callback(self, future):
         response = future.result()
@@ -435,6 +427,15 @@ class ChargeAction(Node):
                 if self.battery_ >= 1.01 or self.stop_loop:
                     self.get_logger().info("break loop_")
                     self.get_logger().info(f"battery: {self.battery_}, stop_loop: {str(self.stop_loop)}, charge_position_bool: {str(self.charger_position_bool)}")
+                    
+                    # 停止检测apriltag，对接完成后就停止检测apriltag
+                    if self.apriltag_detecting and not self.stop_apriltag_detecting_executing:
+                        self.get_logger().info('-------- call /stop_detect_apriltag service --------')
+                        self.stop_apriltag_detecting_executing = True
+                        request = StopDetectApriltag.Request()
+                        future_stop_apriltag = self.stop_apriltag_client_.call_async(request)
+                        future_stop_apriltag.add_done_callback(self.stop_apriltag_detect_future_done_callback)
+                    
                     # switch resolution to 640x480
                     if self.resolution_high and not self.switch_resolution_executing:
                         self.get_logger().info('-------- call /rgb_camera_manager_server/switch_resolution service with resolution:640x480 --------')
