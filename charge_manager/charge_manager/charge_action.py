@@ -432,7 +432,7 @@ class ChargeAction(Node):
         while True:
             self.timer_loop_callback()
             if self.dock_completed:
-                if self.battery_ >= 1.01 or self.stop_loop or not self.charger_position_bool:
+                if self.battery_ >= 1.01 or self.stop_loop:
                     self.get_logger().info("break loop_")
                     self.get_logger().info(f"battery: {self.battery_}, stop_loop: {str(self.stop_loop)}, charge_position_bool: {str(self.charger_position_bool)}")
                     # switch resolution to 640x480
