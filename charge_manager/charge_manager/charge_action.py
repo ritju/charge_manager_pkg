@@ -214,7 +214,7 @@ class ChargeAction(Node):
             self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
             self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
         
-        if not self.apriltag_detecting and not self.dock_completed and not self.stop_loop and not self.start_apriltag_detecting_executing:
+        if not self.apriltag_detecting and not self.stop_loop and not self.start_apriltag_detecting_executing:
             self.get_logger().info('-------- call /start_detect_apriltag service --------')
             self.start_apriltag_detecting_executing = True
             request = StartDetectApriltag.Request()
@@ -286,13 +286,18 @@ class ChargeAction(Node):
         self.stop_apriltag_detecting_executing = False
         
     def switch_resolution_future_done_callback(self, future):
-        response = future.result()
-        if response.success:
-            self.get_logger().info(f'switch resolution mode to {response.resolution_mode} success.')
-        else:
-            self.get_logger().info(f'switch resolution mode to {response.resolution_mode} failed.')
-        self.resolution_high = True if response.resolution_mode == RgbCameraResolution.RESOLUTION_HIGH else False
-        self.switch_resolution_executing = False
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info(f'switch resolution mode to {response.resolution_mode} success.')
+            else:
+                self.get_logger().info(f'switch resolution mode to {response.resolution_mode} failed.')
+            self.resolution_high = (response.resolution_mode == RgbCameraResolution.RESOLUTION_HIGH)
+        except Exception as e:
+            self.get_logger().error(f'switch_resolution service call failed: {str(e)}')
+            self.resolution_high = False
+        finally:
+            self.switch_resolution_executing = False
 
     # charge_action goal_callback
     def charge_action_goal_callback(self, goal_request):
