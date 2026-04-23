@@ -24,6 +24,9 @@ from geometry_msgs.msg import Twist
 from capella_ros_msg.msg import Velocities
 from capella_ros_service_interfaces.srv import StartDetectApriltag, StopDetectApriltag, SwitchResolution
 
+import collections
+import threading
+
 class ChargeActionState():
     idle = 'idle'
     stop_bluetooth_node = 'stop_bluetooth_node'
@@ -171,6 +174,10 @@ class ChargeAction(Node):
         # add process when dock goal is rejected
         self.dock_goal_rejected = False
 
+        # 滑动窗口相关
+        self.raw_vel_window = collections.deque()   # 存储 (timestamp, exceed_bool)
+        self.raw_vel_lock = threading.Lock()
+
     def is_undocking_state_sub_callback(self, msg):
         self.is_undocking_state = msg.data
         self.is_undocking_state_last_time = time.time()
@@ -189,16 +196,28 @@ class ChargeAction(Node):
     
     def raw_vel_sub_callback(self, msg):
         if not self.stop_loop and self.dock_completed:
+            now = time.time()
             linear_x = abs(msg.linear_x)
             angular_z = abs(msg.angular_z)
-            if linear_x > 0.1 or angular_z > 0.1:
-                self.get_logger().info(f'检测到/raw_vel topic linear_x: {linear_x}, angular_z: {angular_z}, 停止充电。')
-                self.stop_loop = True
-            else:
-                pass
-        else:
-            pass
-
+            exceed = (linear_x > 0.1 or angular_z > 0.1)
+            
+            with self.raw_vel_lock:
+                # 添加当前样本
+                self.raw_vel_window.append((now, exceed))
+                # 移除超过3秒的旧样本
+                while self.raw_vel_window and (now - self.raw_vel_window[0][0]) > 3.0:
+                    self.raw_vel_window.popleft()
+                
+                # 只有当窗口时长达到3秒时才进行比例判断
+                if self.raw_vel_window and (now - self.raw_vel_window[0][0]) >= 3.0:
+                    total = len(self.raw_vel_window)
+                    exceed_count = sum(1 for _, e in self.raw_vel_window if e)
+                    ratio = exceed_count / total
+                    if ratio >= 0.8:
+                        self.get_logger().info(
+                            f'检测到/raw_vel topic: 3秒内超过阈值的比例 {ratio:.2%} >= 80%，停止充电。'
+                        )
+                        self.stop_loop = True
     def timer_loop_callback(self):        
         if self.connect_bluetooth_client_.wait_for_service(2):
             self.bluetooth_setup = True
