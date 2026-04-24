@@ -209,15 +209,19 @@ class ChargeAction(Node):
                     self.raw_vel_window.popleft()
                 
                 # 只有当窗口时长达到3秒时才进行比例判断
-                if self.raw_vel_window and (now - self.raw_vel_window[0][0]) >= 3.0:
+                if self.raw_vel_window and (now - self.raw_vel_window[0][0]) >= 2.5:  # 确保窗口内数据覆盖了最近3秒
                     total = len(self.raw_vel_window)
                     exceed_count = sum(1 for _, e in self.raw_vel_window if e)
                     ratio = exceed_count / total
                     if ratio >= 0.8:
                         self.get_logger().info(
-                            f'检测到/raw_vel topic: 3秒内超过阈值的比例 {ratio:.2%} >= 80%，停止充电。'
+                            f'检测到/raw_vel topic: 3秒内超过阈值的比例 {ratio:.2%} >= 80% (total: {total}, exceed_count: {exceed_count})，停止充电。'
                         )
                         self.stop_loop = True
+                    else:
+                        self.get_logger().info(
+                            f'检测到/raw_vel topic: 3秒内超过阈值的比例 {ratio:.2%} (total: {total}, exceed_count: {exceed_count})', throttle_duration_sec=5.0
+                        )
     def timer_loop_callback(self):        
         if self.connect_bluetooth_client_.wait_for_service(2):
             self.bluetooth_setup = True
