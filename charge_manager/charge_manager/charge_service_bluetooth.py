@@ -485,7 +485,8 @@ class BluetoothChargeServer(Node):
             if self.uuid_write is None or self.uuid_notify is None:
                 raise Exception("未找到需要的 write 或 notify 特征")
 
-            await client.start_notify(self.uuid_notify, self.notify_data)
+            # await client.start_notify(self.uuid_notify, self.notify_data)
+            await client.start_notify(self.uuid_notify, self.notify_data, _bluez="AcquireNotify")
 
             # 连接成功并启动通知后再标记状态
             self.charge_state.pid = address
