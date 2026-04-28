@@ -540,6 +540,7 @@ class BluetoothChargeServer(Node):
                 except Exception as e:
                     self.get_logger().info(f'断开连接时异常: {e}')
             self.get_logger().info('BLE 连接已关闭')
+            self._write_restore_file('1')
 
     def notify_data(self, sender, data):
         self.heartbeat_time = time.time()
