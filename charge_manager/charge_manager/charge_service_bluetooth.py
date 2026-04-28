@@ -378,7 +378,7 @@ class BluetoothChargeServer(Node):
                     except:
                         pass
             time_wait = time.time()
-            while self.use_bluetooth_restore_service and restore and (time.time() - time_wait) < 25.0:
+            while self.use_bluetooth_restore_service and restore and (time.time() - time_wait) < 30.0:
                 self.get_logger().info("Waiting for bluetooth restoring ......")
                 time.sleep(2)
                 content = self.wait_and_read('/map/bluetooth_restore.txt')
