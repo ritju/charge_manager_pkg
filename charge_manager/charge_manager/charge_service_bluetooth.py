@@ -487,6 +487,7 @@ class BluetoothChargeServer(Node):
 
             # await client.start_notify(self.uuid_notify, self.notify_data)
             await client.start_notify(self.uuid_notify, self.notify_data, _bluez="AcquireNotify")
+            self.get_logger().info("start_notify")
 
             # 连接成功并启动通知后再标记状态
             self.charge_state.pid = address
