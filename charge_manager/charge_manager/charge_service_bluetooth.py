@@ -22,7 +22,8 @@ import fcntl
 class BluetoothChargeServer(Node):
     def __init__(self, name):
         super().__init__(name)
-        self.declare_parameter("use_bluetooth_restore_service", "False")
+        env_var = os.environ.get('DOCK_USE_BLUETOOTH_RESTORE_SERVICE', 'False')
+        self.declare_parameter("use_bluetooth_restore_service", env_var)
         self.use_bluetooth_restore_service = self.get_parameter("use_bluetooth_restore_service").get_parameter_value().string_value.strip().lower()
         if self.use_bluetooth_restore_service in ('true', 'yes', 'on', '1', 't', 'y', 'enabled'):
             self.get_logger().info('use_bluetooth_restore_service: True')
