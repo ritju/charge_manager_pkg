@@ -38,6 +38,7 @@ class BluetoothChargeServer(Node):
         self.send_data = None
         self.send_heartbeat_data = ['6b', '00', '00', '00', '00', '6b', '00', '00', '00', '21', '09', '00']
         self.heartbeat_time = 0
+        self.data_received_time = 0
         self.disconnect_bluetooth = False
         self.bluetooth_found = False
 
@@ -165,8 +166,8 @@ class BluetoothChargeServer(Node):
                 self.get_logger().info(f"bluetooth => contact state change from {str(self.contact_state_last_)} to {str(self.charge_state.has_contact)}")
                 self.contact_state_last_ = self.charge_state.has_contact
 
-            if (self.bluetooth_connected and self.heartbeat_time > 0 
-                    and time.time() - self.heartbeat_time > 20):
+            if (self.bluetooth_connected and self.data_received_time > 0 
+                    and time.time() - self.data_received_time > 20):
                 self.get_logger().info("No data received more than 20 seconds.")
                 self.charge_state.pid = ''
                 self.charge_state.has_contact = False
@@ -390,6 +391,7 @@ class BluetoothChargeServer(Node):
 
             self.get_logger().info("正在重连蓝牙...")
             self.heartbeat_time = 0
+            self.data_received_time = 0
             self.connect_start_time = time.time()
             self.connect_exception = ""
             self.charge_state.pid = ''
@@ -426,10 +428,10 @@ class BluetoothChargeServer(Node):
 
             if self.bluetooth_connected:
                 self.get_logger().info('蓝牙连接成功.')
-                self.heartbeat_time = time.time()
                 response.success = True
                 response.connection_time = round(time.time() - self.connect_start_time, 1)
                 response.result = f"蓝牙连接成功 {self.connect_exception}"
+                self.data_received_time = time.time()
                 self._write_restore_file('0')
             else:
                 self.get_logger().info('蓝牙连接失败.')
@@ -477,23 +479,28 @@ class BluetoothChargeServer(Node):
             self.uuid_notify = None
             services = client.services
             for service in services:
-                for char in service.characteristics:
-                    if 'write' in char.properties:
-                        self.uuid_write = char.uuid
-                    if 'notify' in char.properties:
-                        self.uuid_notify = char.uuid
+                for character in service.characteristics:
+                    # 获取发送数据的蓝牙服务uuid
+                    if character.properties == ['write-without-response', 'write']:
+                        self.uuid_write = character.uuid
+                        self.get_logger().info(f"uuid_write: {self.uuid_write}, properties: {character.properties}")
+                    # 获取接收数据的蓝牙服务uuid
+                    elif character.properties == ['read', 'notify']:
+                        self.uuid_notify = character.uuid                        
+                        self.get_logger().info(f"uuid_notify: {self.uuid_notify}, properties: {character.properties}")
+                    else:
+                        continue
 
             if self.uuid_write is None or self.uuid_notify is None:
                 raise Exception("未找到需要的 write 或 notify 特征")
 
             # await client.start_notify(self.uuid_notify, self.notify_data)
-            await client.start_notify(self.uuid_notify, self.notify_data, _bluez="AcquireNotify")
+            await client.start_notify(self.uuid_notify, self.notify_data)
             self.get_logger().info("start_notify")
 
             # 连接成功并启动通知后再标记状态
             self.charge_state.pid = address
             self.bluetooth_connected = True
-            self.heartbeat_time = time.time()
 
             while True:
                 if not rclpy.ok():
@@ -510,7 +517,8 @@ class BluetoothChargeServer(Node):
                     await client.write_gatt_char(self.uuid_write, self.send_data, response=False)
                     self.send_data = None
 
-                if self.udp_data is not None:
+                current_time = time.time()
+                if current_time - self.heartbeat_time > 0.5:
                     send_d = self.send_heartbeat_data.copy()
                     send_d[8] = '80'
                     send_d[9] = '21'
@@ -522,6 +530,7 @@ class BluetoothChargeServer(Node):
                     heart_bytes = bytes.fromhex(''.join(send_d))
                     await client.write_gatt_char(self.uuid_write, heart_bytes, response=False)
                     self.udp_data = None
+                    self.heartbeat_time = current_time
 
                 await asyncio.sleep(0.5)
 
@@ -540,12 +549,14 @@ class BluetoothChargeServer(Node):
                 except Exception as e:
                     self.get_logger().info(f'断开连接时异常: {e}')
             self.get_logger().info('BLE 连接已关闭')
-            self._write_restore_file('1')
 
     def notify_data(self, sender, data):
-        self.heartbeat_time = time.time()
+        self.data_received_time = time.time()
         data_list = ['{:02x}'.format(x) for x in data]
         self.get_logger().info(f'解析后的数据为： {data_list}', throttle_duration_sec=10)
+        if len(data_list) < 10:
+            self.get_logger().info(f'data is too short: {data_list}')
+            return
         crc8_ = self.crc8(data_list[:-2])
         if crc8_ == data_list[-2].upper():
             self.udp_data = data_list
