@@ -287,7 +287,7 @@ class ChargeAction(Node):
         return sorted([d.split('/')[-1] for d in devices])
     
     @staticmethod
-    def get_hci_devices_pattern(pattern: str = r'hhci\d+') -> List[str]:
+    def get_hci_devices_pattern(pattern: str = r'hci\d+') -> List[str]:
         """使用正则表达式获取匹配的蓝牙设备"""
         devices = ChargeAction.get_all_hci_devices()
         regex = re.compile(pattern)
