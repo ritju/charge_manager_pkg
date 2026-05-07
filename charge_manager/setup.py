@@ -34,7 +34,8 @@ setup(
                 'charge_action=charge_manager.charge_action:main',
                 'charge_manage=charge_manager.charge_manager:main',
                 'charge_bluetooth_old=charge_manager.charge_service_bluetooth:main',
-                'test_dance=charge_manager.video_control_speed_node:main'
+                'test_dance=charge_manager.video_control_speed_node:main',
+                'mqtt_bridge=charge_manager.mqtt_bridge_for_ros2:main',
         ],
     },
 )

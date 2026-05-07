@@ -22,10 +22,17 @@ from std_srvs.srv import Empty as EmptyForSrv
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 from capella_ros_msg.msg import Velocities
+from capella_ros_msg.srv import TurnoffPcPower
 from capella_ros_service_interfaces.srv import StartDetectApriltag, StopDetectApriltag, SwitchResolution
 
 import collections
 import threading
+
+import glob
+import re
+from typing import List, Optional
+import os
+import subprocess
 
 class ChargeActionState():
     idle = 'idle'
@@ -107,6 +114,9 @@ class ChargeAction(Node):
         # 创建切换 rgb_camera_back resolution 客户端
         self.switch_resolution_client_ = self.create_client(SwitchResolution, '/rgb_camera_manager_server/switch_resolution', callback_group=self.cb_group)
         
+        # 创建重新上电服务客户端
+        self.power_off_on_client_ = self.create_client(TurnoffPcPower, '/off_pc_power', callback_group=self.cb_group)
+        
         # 创建对接充电桩的客户端
         self.dock_client_ = ActionClient(self, Dock, "dock", callback_group=self.cb_group)
 
@@ -132,6 +142,78 @@ class ChargeAction(Node):
         self.goal_handle = None
         self.init_params() 
         
+        env = os.environ.get('CHARGE_ACTION_ALLOW_POWER_OFF_ON', 'False')
+        env_bool = env.lower() == 'true'
+        self.declare_parameter("charge_action_allow_power_off_on", env_bool)
+        self.charge_action_allow_power_off_on = self.get_parameter("charge_action_allow_power_off_on").get_parameter_value().bool_value
+        self.get_logger().info(f"charge_action_allow_power_off_on: {'True' if self.charge_action_allow_power_off_on else 'False'}")
+        
+        # 添加断电重启冷却时间相关变量
+        env_interval = os.environ.get('CHARGE_ACTION_POWER_OFF_ON_INTERVAL', '1800')  # 默认1800秒
+        self.declare_parameter("power_off_on_interval", float(env_interval))
+        self.power_off_on_interval = self.get_parameter("power_off_on_interval").get_parameter_value().double_value
+        self.last_power_off_on_time = 0.0
+        self.get_logger().info(f"power_off_on_interval: {self.power_off_on_interval}")
+    
+        # 尝试从文件读取上次断电时间
+        self.load_last_power_off_time()
+        
+    def load_last_power_off_time(self):
+        """从文件加载上次断电重启的时间，如果文件不存在则创建并写入0"""
+        try:
+            file_path = '/map/last_power_off_time.txt'
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content:  # 确保文件内容不为空
+                        self.last_power_off_on_time = float(content)
+                    else:
+                        self.last_power_off_on_time = 0.0
+                self.get_logger().info(f'Loaded last power off time: {self.last_power_off_on_time}')
+            else:
+                # 文件不存在，创建文件并写入0
+                self.get_logger().info('Power off time file not found, creating new file with initial value 0')
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write('0')
+                self.last_power_off_on_time = 0.0
+                self.get_logger().info('Created new power off time file with initial value 0')
+        except ValueError as e:
+            self.get_logger().warn(f'Invalid power off time format in file: {str(e)}, resetting to 0')
+            self.last_power_off_on_time = 0.0
+            # 尝试修复文件内容
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write('0')
+            except Exception as write_err:
+                self.get_logger().warn(f'Failed to fix power off time file: {str(write_err)}')
+        except Exception as e:
+            self.get_logger().warn(f'Failed to load last power off time: {str(e)}')
+            self.last_power_off_on_time = 0.0
+
+    def save_last_power_off_time(self):
+        """保存本次断电重启的时间到文件"""
+        try:
+            file_path = '/map/last_power_off_time.txt'
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(str(time.time()))
+            self.last_power_off_on_time = time.time()
+            self.get_logger().info(f'Saved last power off time: {self.last_power_off_on_time}')
+        except Exception as e:
+            self.get_logger().warn(f'Failed to save last power off time: {str(e)}')
+
+    def can_perform_power_off_on(self):
+        """检查是否可以执行断电重启操作"""
+        current_time = time.time()
+        time_since_last = current_time - self.last_power_off_on_time
+        
+        if time_since_last < self.power_off_on_interval:
+            self.get_logger().info(
+                f'Power off on cooling period: need to wait {self.power_off_on_interval - time_since_last:.1f} seconds. '
+                f'Last power off was {time_since_last:.1f} seconds ago.'
+            )
+            return False
+        return True
+    
     def init_params(self):        
         # 初始化蓝牙相关参数
         self.mac = ''
@@ -157,7 +239,9 @@ class ChargeAction(Node):
 
         # 蓝牙连接和dock对接状态控制,避免执行状态中再次重复发送goal
         self.dock_executing = False
-        self.connect_bluetooth_executing = False       
+        self.connect_bluetooth_executing = False     
+        
+        self.power_off_on_executing = False  
 
         # init self.charger_state
         self.charger_state = ChargeState()
@@ -177,6 +261,7 @@ class ChargeAction(Node):
         # 滑动窗口相关
         self.raw_vel_window = collections.deque()   # 存储 (timestamp, exceed_bool)
         self.raw_vel_lock = threading.Lock()
+        
 
     def is_undocking_state_sub_callback(self, msg):
         self.is_undocking_state = msg.data
@@ -193,6 +278,20 @@ class ChargeAction(Node):
 
     def charger_position_bool_sub_callback(self, msg):
         self.charger_position_bool = msg.data
+    
+    @staticmethod
+    def get_all_hci_devices() -> List[str]:
+        """获取所有 hci 设备列表（如 ['hci0', 'hci1', 'hci2']）"""
+        devices = glob.glob('/sys/class/bluetooth/hci*')
+        # 排序，确保 hci0, hci1, hci2 的顺序
+        return sorted([d.split('/')[-1] for d in devices])
+    
+    @staticmethod
+    def get_hci_devices_pattern(pattern: str = r'hhci\d+') -> List[str]:
+        """使用正则表达式获取匹配的蓝牙设备"""
+        devices = ChargeAction.get_all_hci_devices()
+        regex = re.compile(pattern)
+        return [d for d in devices if regex.match(d)]
     
     def raw_vel_sub_callback(self, msg):
         if not self.stop_loop and self.dock_completed:
@@ -243,10 +342,28 @@ class ChargeAction(Node):
             request = StartDetectApriltag.Request()
             self.future_start_apriltag = self.start_apriltag_client_.call_async(request)
             self.future_start_apriltag.add_done_callback(self.start_apriltag_detect_future_done_callback)
-
+        
         if self.bluetooth_setup:
             if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.stop_loop: # do not connect bluetooth when rebooting bluetooth server
                 self.connect_bluetooth_executing = True
+                
+                hci_devices = ChargeAction.get_hci_devices_pattern()
+                if len(hci_devices) > 0:
+                    self.get_logger().info(f'hci devices: {hci_devices}')
+                else:
+                    self.get_logger().info(f'No hci device detected.')
+                    if (not self.power_off_on_executing and 
+                        self.charge_action_allow_power_off_on and 
+                        self.power_off_on_client_.wait_for_service(2) and
+                        self.can_perform_power_off_on()):  # 添加冷却时间检查
+                        self.power_off_on_executing = True
+                        self.save_last_power_off_time()  # 在调用前先保存时间
+                        self.get_logger().info('-------- call /off_pc_power service --------')
+                        off_pc_power_request = TurnoffPcPower.Request()
+                        off_pc_power_request.request_stu = True
+                        self.future_power_off_on = self.power_off_on_client_.call_async(off_pc_power_request)
+                        self.future_power_off_on.add_done_callback(self.power_off_on_done_callback)
+                
                 self.get_logger().info(f"-------- call /connect_bluetooth service, {self.bluetooth_connect_num + 1} / {self.bluetooth_connect_num_max} --------")
 
                 request = ConnectBluetooth.Request()
@@ -288,6 +405,14 @@ class ChargeAction(Node):
         # self.get_logger().info(f"=== charge action ===      state: {self.feedback_msg.state}", throttle_duration_sec=1)
         self.goal_handle.publish_feedback(self.feedback_msg)
 
+    def power_off_on_done_callback(self, future):
+        response = future.result()
+        if response.response_stu == True:
+            self.get_logger().info('/off_pc_power success, pc will power off after 150s.')
+        else:
+            self.get_logger().info('/off_pc_power failed, waiting for call /off_pc_power again.')
+            self.power_off_on_executing = False
+    
     def start_apriltag_detect_future_done_callback(self, future):
         response = future.result()
         if response.success:
