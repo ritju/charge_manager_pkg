@@ -409,6 +409,16 @@ class ChargeAction(Node):
         response = future.result()
         if response.response_stu == True:
             self.get_logger().info('/off_pc_power success, pc will power off after 150s.')
+            try:
+                self.get_logger().info("after 10 seconds, systemctl poweroff will be executed.")
+                time.sleep(10)
+                result = subprocess.run(['sudo', 'systemctl', 'poweroff'], check=True)
+                if result.returncode == 0:
+                    self.get_logger().info('systemctl poweroff successfully, host will shut down.')
+                else:
+                    self.get_logger().error(f'systemctl poweroff failed: {result.stderr}')
+            except Exception as e:
+                self.get_logger().error(f'Exception during poweroff: {str(e)}')
         else:
             self.get_logger().info('/off_pc_power failed, waiting for call /off_pc_power again.')
             self.power_off_on_executing = False
