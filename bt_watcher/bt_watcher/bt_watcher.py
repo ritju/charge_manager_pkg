@@ -31,6 +31,14 @@ console_handler.setFormatter(logging.Formatter(
 logger.addHandler(console_handler)
 
 
+async def _safe_disconnect(client):
+    """Disconnect a BleakClient safely, swallowing any errors."""
+    try:
+        await client.disconnect()
+    except Exception as e:
+        logger.debug(f'Error during disconnect (ignored): {e}')
+
+
 class MQTT_BLEClient:
     # MQTT Topics
     TOPIC_DATA = "charger/ble/data"
@@ -89,7 +97,8 @@ class MQTT_BLEClient:
             "mac": self.current_mac,
             "last_data_received": self.data_received_time
         }
-        self.mqtt_client.publish(self.TOPIC_STATUS, json.dumps(status), qos=1).wait()
+        await self.mqtt_client.publish(self.TOPIC_STATUS, json.dumps(status), qos=1)
+        logger.info(f"Published status: id={self._status_id}, connected={self.bluetooth_connected}, mac={self.current_mac or 'N/A'}")
 
     async def _publish_state(self):
         self._state_id += 1
@@ -102,12 +111,13 @@ class MQTT_BLEClient:
             "water_mode": self.charge_state["water_mode"],
             "timestamp": time.time()
         }
-        self.mqtt_client.publish(self.TOPIC_STATE, json.dumps(state_payload), qos=1).wait()
+        await self.mqtt_client.publish(self.TOPIC_STATE, json.dumps(state_payload), qos=1)
+        logger.info(f"Published state: id={self._state_id}, pid={self.charge_state['pid']}, charging={self.charge_state['is_charging']}, flooding={self.charge_state['is_waterflooding']}")
 
     async def _publish_data(self, payload):
         self._data_id += 1
         payload["id"] = self._data_id
-        self.mqtt_client.publish(self.TOPIC_DATA, json.dumps(payload), qos=1).wait()
+        await self.mqtt_client.publish(self.TOPIC_DATA, json.dumps(payload), qos=1)
 
     async def _publish_response(self, request_id, topic, code, msg="", **extra):
         """Publish a response using the request's own ID and source topic."""
@@ -120,7 +130,7 @@ class MQTT_BLEClient:
         if msg:
             resp["msg"] = msg
         resp.update(extra)
-        self.mqtt_client.publish(self.TOPIC_RESPONSE, json.dumps(resp), qos=1).wait()
+        await self.mqtt_client.publish(self.TOPIC_RESPONSE, json.dumps(resp), qos=1)
 
     def _notify_callback(self, sender, data):
         """Synchronous callback from Bleak — bridge to async loop."""
@@ -247,25 +257,33 @@ class MQTT_BLEClient:
                                          "Missing 'mac' field")
             return
 
-        # Already connected to a DIFFERENT device?
+        # Already connected to a DIFFERENT device? Cancel existing connection
         if self.bluetooth_connected and self.current_mac != mac:
             logger.warning(
-                f"Connect request for {mac} but already connected to {self.current_mac}"
+                f"Connect request for {mac}, currently connected to {self.current_mac}. Reconnecting..."
             )
-            await self._publish_response(
-                request_id, self.TOPIC_CONNECT, "already_connected",
-                f"Already connected to {self.current_mac}",
-                current_mac=self.current_mac,
-            )
-            return
+            self._disconnect_flag = True
+            if self._ble_task and not self._ble_task.done():
+                self._ble_task.cancel()
+                try:
+                    await self._ble_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            self._disconnect_flag = False
 
-        # Same MAC or not connected yet
-        if self._ble_task is None or self._ble_task.done():
-            self._ble_task = asyncio.create_task(self._ble_loop(mac))
-            await self._publish_response(request_id, self.TOPIC_CONNECT, "ok", f"Connecting to {mac}")
+        # Connect first, then respond
+        success = await self._ble_connect(mac)
+        if success:
+            # Start the heartbeat loop in background
+            await self._publish_response(
+                request_id, self.TOPIC_CONNECT, "ok",
+                f"Connected to {mac}"
+            )
+            self._ble_task = asyncio.create_task(self._ble_run_loop())
         else:
             await self._publish_response(
-                request_id, self.TOPIC_CONNECT, "ok", f"Already connecting to {self.current_mac or mac}"
+                request_id, self.TOPIC_CONNECT, "connection_failed",
+                f"Failed to connect to {mac}"
             )
 
     async def _handle_disconnect(self, payload):
@@ -278,13 +296,10 @@ class MQTT_BLEClient:
             except (asyncio.CancelledError, Exception):
                 pass
 
-        self.charge_state["pid"] = ""
-        self.bluetooth_connected = False
-        await self._publish_status()
         await self._publish_response(request_id, self.TOPIC_DISCONNECT, "ok", msg="disconnected")
 
-    async def _ble_loop(self, address):
-        """Main BLE connection loop (fully async)."""
+    async def _ble_connect(self, address):
+        """Connect to a BLE device and discover its services. Returns True on success."""
         client = None
         try:
             logger.info(f"Scanning for Bluetooth devices...")
@@ -302,7 +317,6 @@ class MQTT_BLEClient:
                 logger.warning(f'Device not found at {address}, trying direct connection')
                 client = BleakClient(address)
 
-            self._ble_client = client
             await client.connect()
 
             self.uuid_write = None
@@ -331,15 +345,29 @@ class MQTT_BLEClient:
             await client.start_notify(self.uuid_notify, self._notify_callback)
             logger.info("start_notify")
 
+            self._ble_client = client
             self.charge_state["pid"] = address
             self.current_mac = address
             self.bluetooth_connected = True
             self._disconnect_flag = False
-            await self._publish_status()
-            await self._publish_state()
+            return True
 
+        except Exception as e:
+            logger.error(f'BLE connection error: {str(e)}')
+            # Disconnect the local client if setup failed but connect succeeded
+            if client is not None:
+                await _safe_disconnect(client)
+            await self._ble_cleanup()
+            return False
+
+    async def _ble_run_loop(self):
+        """Run the heartbeat loop after connection is established."""
+        client = self._ble_client
+        if client is None:
+            return
+
+        try:
             heartbeat_time = 0
-
             while True:
                 if not client.is_connected:
                     logger.error('BLE disconnected unexpectedly')
@@ -385,23 +413,24 @@ class MQTT_BLEClient:
         except asyncio.CancelledError:
             logger.info("BLE task cancelled")
         except Exception as e:
-            logger.error(f'BLE connection/communication error: {str(e)}')
+            logger.error(f'BLE communication error: {str(e)}')
         finally:
-            self.bluetooth_connected = False
-            self.charge_state["pid"] = ""
-            self.current_mac = ""
-            self._ble_client = None
-            # Drain remaining notify data
-            while not self._notify_queue.empty():
-                try:
-                    notify_data = self._notify_queue.get_nowait()
-                    await self._process_notify_data(notify_data)
-                except asyncio.QueueEmpty:
-                    break
-            if client is not None:
-                await client.disconnect()
-            await self._publish_status()
-            logger.info('BLE connection closed')
+            await self._ble_cleanup()
+
+    async def _ble_cleanup(self):
+        """Clean up BLE connection state."""
+        self.bluetooth_connected = False
+        self.charge_state["pid"] = ""
+        self.current_mac = ""
+        # Drain remaining notify data
+        while not self._notify_queue.empty():
+            try:
+                notify_data = self._notify_queue.get_nowait()
+                await self._process_notify_data(notify_data)
+            except asyncio.QueueEmpty:
+                break
+        await _safe_disconnect(self._ble_client)
+        self._ble_client = None
 
     async def _mqtt_loop(self, mqtt_client):
         """Listen to MQTT messages and dispatch to handlers."""
@@ -437,12 +466,18 @@ class MQTT_BLEClient:
                     await mqtt.subscribe(self.TOPIC_DISCONNECT, qos=1)
                     logger.info(f"Subscribed to {self.TOPIC_COMMAND}, {self.TOPIC_CONNECT}, {self.TOPIC_DISCONNECT}")
 
-                    await self._publish_status()
+                    # Launch tasks manually (compatible with Python < 3.11)
+                    mqtt_task = asyncio.create_task(self._mqtt_loop(mqtt))
+                    status_task = asyncio.create_task(self._status_publisher_loop())
+                    shutdown_task = asyncio.create_task(self._shutdown_event.wait())
 
-                    async with asyncio.TaskGroup() as tg:
-                        tg.create_task(self._mqtt_loop(mqtt))
-                        tg.create_task(self._status_publisher_loop())
-                        tg.create_task(self._shutdown_event.wait())
+                    # Wait for any task to complete
+                    done, pending = await asyncio.wait(
+                        {mqtt_task, status_task, shutdown_task},
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in pending:
+                        task.cancel()
             except Exception as e:
                 logger.error(f"MQTT connection error: {e}")
                 logger.info("Reconnecting in 5 seconds...")
@@ -484,3 +519,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
