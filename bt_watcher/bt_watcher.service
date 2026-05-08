@@ -1,0 +1,18 @@
+[Unit]
+Description=BT Watcher - BLE Charger Manager Service
+After=network.target bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+User=__RUN_USER__
+Environment=HOME=__RUN_HOME__
+WorkingDirectory=__WORKING_DIR__
+ExecStart=/usr/bin/python3 __WORKING_DIR__/bt_watcher/bt_watcher.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bt_watcher
+
+[Install]
+WantedBy=multi-user.target
