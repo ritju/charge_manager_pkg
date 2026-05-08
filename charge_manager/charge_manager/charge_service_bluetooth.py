@@ -544,8 +544,8 @@ class BluetoothChargeServer(Node):
                 self._client = None
             if client is not None:
                 try:
-                    if client.is_connected:
-                        await client.disconnect()
+                    # if client.is_connected:
+                    await client.disconnect()
                 except Exception as e:
                     self.get_logger().info(f'断开连接时异常: {e}')
             self.get_logger().info('BLE 连接已关闭')
