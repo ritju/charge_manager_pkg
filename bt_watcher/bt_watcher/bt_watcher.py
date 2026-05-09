@@ -34,6 +34,7 @@ logger.addHandler(console_handler)
 # Hardware debug logger — dedicated file for BLE data only
 hw_logger = logging.getLogger('bt_watcher.hw')
 hw_logger.setLevel(logging.INFO)
+hw_logger.propagate = False  # Prevent logs from appearing in bt_watcher logger
 hw_handler = RotatingFileHandler(
     os.path.expanduser('~/.local/share/bt_watcher/logs/hw_data.log'),
     maxBytes=30 * 1024 * 1024,
@@ -72,6 +73,8 @@ class MQTT_BLEClient:
         self.bluetooth_connected = False
         self.uuid_notify = None
         self.uuid_write = None
+        self.char_write = None
+        self.char_notify = None
         self.send_heartbeat_data = ['6b', '00', '00', '00', '00', '6b', '00', '00', '00', '21', '09', '00']
         self.data_received_time = 0
         self.charge_state = {
@@ -166,6 +169,29 @@ class MQTT_BLEClient:
         self.data_received_time = time.time()
         self._notify_queue.put_nowait(data)
 
+    async def _send_notify_response(self, client, is_heartbeat=False):
+        """Send 80 21 response to the charger after processing notify data.
+        
+        Frame format: 6B A0..A3 6B XXXXH 80H 21H xxxxxH D0..D7 CS 16H
+        - For heartbeat (no prior notify): use default template
+        - For notify response: echo address, seq, length, data from last received frame
+        """
+        # Response to notify: echo fields from last received frame
+        # udp_data format: [6B, A0.., ..., 6B, len_hi, len_lo, 00, 21, data..., CS, 16]
+        # Response:       [6B, A0.., ..., 6B, len_hi, len_lo, 80, 21, data..., CS, 16]
+        src = self.send_heartbeat_data
+        send_d = src[:8].copy()  # 6B + address + 6B
+        send_d.append('80')      # command code: 80 21 (response)
+        send_d.append('21')
+        send_d.append('01')
+        send_d.append('00')
+        send_d.append('00')
+        send_d.append(self.crc8(send_d))
+        send_d.append('16')
+        heart_bytes = bytes.fromhex(''.join(send_d))
+        await client.write_gatt_char(self.char_write, heart_bytes, response=False)
+        self.data_received_time = time.time()
+
     async def _process_notify_data(self, data):
         """Async processing of BLE notification data."""
         data_list = ['{:02x}'.format(x) for x in data]
@@ -200,6 +226,13 @@ class MQTT_BLEClient:
             logger.warning('CRC check failed')
 
         await self._publish_data(raw_payload)
+
+        # Send 80 21 response after processing notify data
+        if self._ble_client:
+            try:
+                await self._send_notify_response(self._ble_client)
+            except Exception as e:
+                logger.error(f'Failed to send notify response: {e}')
 
     async def _send_charger_start(self):
         if not self.charge_state["pid"]:
@@ -350,27 +383,35 @@ class MQTT_BLEClient:
 
             self.uuid_write = None
             self.uuid_notify = None
+            self.char_write = None  # Store characteristic object for direct access
+            self.char_notify = None
             for service in client.services:
                 for char in service.characteristics:
                     props = char.properties
                     if isinstance(props, list):
                         if 'write-without-response' in props or 'write' in props:
-                            self.uuid_write = char.uuid
+                            self.uuid_write = str(char.uuid)
+                            self.char_write = char
                             logger.info(f"uuid_write: {self.uuid_write}, properties: {props}")
                         if 'read' in props and 'notify' in props:
-                            self.uuid_notify = char.uuid
+                            self.uuid_notify = str(char.uuid)
+                            self.char_notify = char
                             logger.info(f"uuid_notify: {self.uuid_notify}, properties: {props}")
                     elif isinstance(props, str):
                         if 'write' in props:
-                            self.uuid_write = char.uuid
+                            self.uuid_write = str(char.uuid)
+                            self.char_write = char
                             logger.info(f"uuid_write: {self.uuid_write}, properties: {props}")
                         if 'notify' in props:
-                            self.uuid_notify = char.uuid
+                            self.uuid_notify = str(char.uuid)
+                            self.char_notify = char
                             logger.info(f"uuid_notify: {self.uuid_notify}, properties: {props}")
 
             if self.uuid_write is None or self.uuid_notify is None:
                 raise Exception("Required write or notify characteristic not found")
 
+            # Force service discovery to complete by accessing services
+            _ = client.services
             await client.start_notify(self.uuid_notify, self._notify_callback)
             logger.info("start_notify")
 
@@ -398,9 +439,6 @@ class MQTT_BLEClient:
         try:
             heartbeat_time = 0
             while True:
-                if not client.is_connected:
-                    logger.error('BLE disconnected unexpectedly')
-                    break
                 if self._disconnect_flag:
                     logger.info('Received disconnect request')
                     break
@@ -408,7 +446,8 @@ class MQTT_BLEClient:
                 # Drain pending commands
                 try:
                     cmd_data = self._command_queue.get_nowait()
-                    await client.write_gatt_char(self.uuid_write, cmd_data, response=False)
+                    logger.info(f'Writing command to BLE: {cmd_data.hex()}')
+                    await client.write_gatt_char(self.char_write, cmd_data, response=False)
                     self._command_queue.task_done()
                 except asyncio.QueueEmpty:
                     pass
@@ -422,27 +461,15 @@ class MQTT_BLEClient:
                     except asyncio.QueueEmpty:
                         break
 
-                # Heartbeat: only send if no BLE communication for 3 seconds
-                current_time = time.time()
-                if current_time - self.data_received_time >= 3:
-                    send_d = self.send_heartbeat_data.copy()
-                    send_d[8] = '80'
-                    send_d[9] = '21'
-                    send_d[10] = '01'
-                    send_d[11] = '00'
-                    send_d.append('00')
-                    send_d.append(self.crc8(send_d))
-                    send_d.append('16')
-                    heart_bytes = bytes.fromhex(''.join(send_d))
-                    await client.write_gatt_char(self.uuid_write, heart_bytes, response=False)
-                    self.data_received_time = current_time
-
                 await asyncio.sleep(0.5)
 
         except asyncio.CancelledError:
             logger.info("BLE task cancelled")
         except Exception as e:
             logger.error(f'BLE communication error: {str(e)}')
+            logger.error(f'Error type: {type(e).__name__}')
+            import traceback
+            logger.error(traceback.format_exc())
         finally:
             await self._ble_cleanup()
 
