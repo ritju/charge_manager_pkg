@@ -103,11 +103,15 @@ class MQTT_BLEClient:
             "last_data_received": self.data_received_time
         }
         await self.mqtt_client.publish(self.TOPIC_STATUS, json.dumps(status), qos=1)
+<<<<<<< HEAD
         # Check if data (excluding id) has changed
         status_data = {k: v for k, v in status.items() if k not in ("id", "last_data_received")}
         if status_data != self._last_status:
             logger.info(f"Published status: id={self._status_id}, connected={self.bluetooth_connected}, mac={self.current_mac or 'N/A'}")
             self._last_status = status_data
+=======
+        logger.info(f"Published status: id={self._status_id}, connected={self.bluetooth_connected}, mac={self.current_mac or 'N/A'}")
+>>>>>>> 8357ba33fb47c53c5a9bb99cc58a89c17bb9bf67
 
     async def _publish_state(self):
         self._state_id += 1
@@ -120,12 +124,17 @@ class MQTT_BLEClient:
             "water_mode": self.charge_state["water_mode"],
             "timestamp": time.time()
         }
+<<<<<<< HEAD
         # Check if data (excluding id and timestamp) has changed
         state_data = {k: v for k, v in state_payload.items() if k not in ("id", "timestamp")}
         if state_data != self._last_state:
             await self.mqtt_client.publish(self.TOPIC_STATE, json.dumps(state_payload), qos=1)
             logger.info(f"Published state: id={self._state_id}, pid={self.charge_state['pid']}, charging={self.charge_state['is_charging']}, flooding={self.charge_state['is_waterflooding']}")
             self._last_state = state_data
+=======
+        await self.mqtt_client.publish(self.TOPIC_STATE, json.dumps(state_payload), qos=1)
+        logger.info(f"Published state: id={self._state_id}, pid={self.charge_state['pid']}, charging={self.charge_state['is_charging']}, flooding={self.charge_state['is_waterflooding']}")
+>>>>>>> 8357ba33fb47c53c5a9bb99cc58a89c17bb9bf67
 
     async def _publish_data(self, payload):
         self._data_id += 1
@@ -542,3 +551,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
