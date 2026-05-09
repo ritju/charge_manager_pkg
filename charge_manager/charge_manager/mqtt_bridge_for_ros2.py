@@ -228,6 +228,10 @@ class BluetoothChargeServer(Node):
             # 如果没有 BLE 连接，清空 pid
             if not self._mqtt_connected:
                 self.charge_state.pid = ''
+                self.charge_state.has_contact = False
+                self.charge_state.is_charging = False
+                self.charge_state.is_waterflooding = False
+                self.charge_state.water_mode = "unknown"
 
             # 发布状态
             self.charge_state_publisher.publish(self.charge_state)
