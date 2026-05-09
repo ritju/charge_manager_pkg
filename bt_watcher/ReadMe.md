@@ -252,19 +252,18 @@ bt_watcher 对所有请求消息返回执行结果。
 | code | 含义 |
 |------|------|
 | `ok` | 请求执行成功 |
-| `already_connected` | 已连接其他设备（connect 请求特有） |
+| `connection_failed` | BLE 连接失败（connect 请求特有） |
 | `invalid_command` | 未知命令（command 请求特有） |
 | `invalid_request` | 请求格式错误 |
 
-**响应示例 — 已连接其他设备：**
+**响应示例 — 连接失败：**
 
 ```json
 {
   "request_id": 2,
   "topic": "charger/ble/connect",
-  "code": "already_connected",
-  "msg": "Already connected to AA:BB:CC:DD:EE:FF",
-  "current_mac": "AA:BB:CC:DD:EE:FF",
+  "code": "connection_failed",
+  "msg": "Failed to connect to AA:BB:CC:DD:EE:FF",
   "timestamp": 1715000000.456
 }
 ```
