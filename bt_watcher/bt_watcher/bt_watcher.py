@@ -319,24 +319,37 @@ class MQTT_BLEClient:
                                          "Missing 'mac' field")
             return
 
-        # Already connected to a DIFFERENT device? Cancel existing connection
-        if self.bluetooth_connected and self.current_mac != mac:
-            logger.warning(
-                f"Connect request for {mac}, currently connected to {self.current_mac}. Reconnecting..."
-            )
-            self._disconnect_flag = True
-            if self._ble_task and not self._ble_task.done():
-                self._ble_task.cancel()
-                try:
-                    await self._ble_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-            self._disconnect_flag = False
+        # Check if we already have an active BLE connection to this device
+        active_ble = self._ble_client is not None and getattr(self._ble_client, "is_connected", False)
 
-        # Connect first, then respond
+        # Case 1: Already connected to the same device with active BLE session
+        if self.current_mac == mac and active_ble:
+            # Restore state if it was lost (e.g., backend restart)
+            if not self.bluetooth_connected:
+                logger.info(f"Backend restarted: restoring connection state for {mac}")
+                self.bluetooth_connected = True
+
+            logger.info(f"Already connected to {mac}, reusing existing BLE session.")
+            if self._ble_task is None or self._ble_task.done():
+                self._ble_task = asyncio.create_task(self._ble_run_loop())
+            await self._publish_response(
+                request_id, self.TOPIC_CONNECT, "ok",
+                f"Already connected to {mac}"
+            )
+            return
+
+        # Case 2: State says connected but BLE is inactive — clean up
+        if self.bluetooth_connected:
+            if self.current_mac == mac and not active_ble:
+                logger.warning(f"Stale connection state for {mac}, cleaning up")
+                await self._cleanup_connection()
+            elif self.current_mac != mac:
+                logger.warning(f"Switching from {self.current_mac} to {mac}")
+                await self._cleanup_connection()
+
+        # Perform new connection
         success = await self._ble_connect(mac)
         if success:
-            # Start the heartbeat loop in background
             await self._publish_response(
                 request_id, self.TOPIC_CONNECT, "ok",
                 f"Connected to {mac}"
@@ -347,6 +360,17 @@ class MQTT_BLEClient:
                 request_id, self.TOPIC_CONNECT, "connection_failed",
                 f"Failed to connect to {mac}"
             )
+
+    async def _cleanup_connection(self):
+        """Clean up current connection state and cancel BLE task."""
+        self._disconnect_flag = True
+        if self._ble_task and not self._ble_task.done():
+            self._ble_task.cancel()
+            try:
+                await self._ble_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._disconnect_flag = False
 
     async def _handle_disconnect(self, payload):
         request_id = payload.get("id")
