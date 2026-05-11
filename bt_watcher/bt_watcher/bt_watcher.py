@@ -71,9 +71,8 @@ class MQTT_BLEClient:
     def __init__(self, mqtt_broker="localhost", mqtt_port=1883):
         # State
         self.bluetooth_connected = False
-        self.uuid_notify = None
-        self.uuid_write = None
         self.char_write = None
+        self.char_write_resp = None
         self.char_notify = None
         self.send_heartbeat_data = ['6b', '00', '00', '00', '00', '6b', '00', '00', '00', '21', '09', '00']
         self.data_received_time = 0
@@ -100,7 +99,6 @@ class MQTT_BLEClient:
         self.mqtt_port = mqtt_port
 
         # Independent message-ID counters per topic
-        self._data_id = 0
         self._state_id = 0
         self._status_id = 0
 
@@ -134,17 +132,15 @@ class MQTT_BLEClient:
             "water_mode": self.charge_state["water_mode"],
             "timestamp": time.time()
         }
+        await self.mqtt_client.publish(self.TOPIC_STATE, json.dumps(state_payload), qos=1)
+
         # Check if data (excluding id and timestamp) has changed
         state_data = {k: v for k, v in state_payload.items() if k not in ("id", "timestamp")}
         if state_data != self._last_state:
-            await self.mqtt_client.publish(self.TOPIC_STATE, json.dumps(state_payload), qos=1)
             logger.info(f"Published state: id={self._state_id}, pid={self.charge_state['pid']}, charging={self.charge_state['is_charging']}, flooding={self.charge_state['is_waterflooding']}")
             self._last_state = state_data
 
-    async def _publish_data(self, payload):
-        self._data_id += 1
-        payload["id"] = self._data_id
-        await self.mqtt_client.publish(self.TOPIC_DATA, json.dumps(payload), qos=1)
+    def _log_notify_data(self, payload):
         crc = payload.get("crc_valid", "")
         raw = payload.get("raw_hex", [])
         ts = payload.get("timestamp", "")
@@ -189,7 +185,8 @@ class MQTT_BLEClient:
         send_d.append(self.crc8(send_d))
         send_d.append('16')
         heart_bytes = bytes.fromhex(''.join(send_d))
-        await client.write_gatt_char(self.char_write, heart_bytes, response=False)
+        char = self.char_write if self.char_write else self.char_write_resp
+        await client.write_gatt_char(char, heart_bytes, response=(char is self.char_write_resp))
         self.data_received_time = time.time()
 
     async def _process_notify_data(self, data):
@@ -204,7 +201,7 @@ class MQTT_BLEClient:
 
         if len(data_list) < 10:
             logger.warning(f'data is too short: {data_list}')
-            await self._publish_data(raw_payload)
+            self._log_notify_data(raw_payload)
             return
 
         crc8_val = self.crc8(data_list[:-2])
@@ -225,7 +222,7 @@ class MQTT_BLEClient:
         else:
             logger.warning('CRC check failed')
 
-        await self._publish_data(raw_payload)
+        self._log_notify_data(raw_payload)
 
         # Send 80 21 response after processing notify data
         if self._ble_client:
@@ -330,6 +327,7 @@ class MQTT_BLEClient:
                 self.bluetooth_connected = True
 
             logger.info(f"Already connected to {mac}, reusing existing BLE session.")
+            self.charge_state["pid"] = mac
             if self._ble_task is None or self._ble_task.done():
                 self._ble_task = asyncio.create_task(self._ble_run_loop())
             await self._publish_response(
@@ -404,39 +402,41 @@ class MQTT_BLEClient:
                 return False
 
             await client.connect()
+            await asyncio.sleep(1)
 
-            self.uuid_write = None
-            self.uuid_notify = None
-            self.char_write = None  # Store characteristic object for direct access
+            self.char_write = None
+            self.char_write_resp = None
             self.char_notify = None
             for service in client.services:
                 for char in service.characteristics:
                     props = char.properties
                     if isinstance(props, list):
-                        if 'write-without-response' in props or 'write' in props:
-                            self.uuid_write = str(char.uuid)
+                        if 'write-without-response' in props:
                             self.char_write = char
-                            logger.info(f"uuid_write: {self.uuid_write}, properties: {props}")
-                        if 'read' in props and 'notify' in props:
-                            self.uuid_notify = str(char.uuid)
+                            logger.info(f"char_write (no-resp): {char.uuid}, properties: {props}")
+                        elif 'write' in props:
+                            self.char_write_resp = char
+                            logger.info(f"char_write_resp: {char.uuid}, properties: {props}")
+                        elif 'read' in props and 'notify' in props:
                             self.char_notify = char
-                            logger.info(f"uuid_notify: {self.uuid_notify}, properties: {props}")
+                            logger.info(f"char_notify: {char.uuid}, properties: {props}")
                     elif isinstance(props, str):
-                        if 'write' in props:
-                            self.uuid_write = str(char.uuid)
+                        if 'write-without-response' in props:
                             self.char_write = char
-                            logger.info(f"uuid_write: {self.uuid_write}, properties: {props}")
-                        if 'notify' in props:
-                            self.uuid_notify = str(char.uuid)
+                            logger.info(f"char_write (no-resp): {char.uuid}, properties: {props}")
+                        elif 'write' in props:
+                            self.char_write_resp = char
+                            logger.info(f"char_write_resp: {char.uuid}, properties: {props}")
+                        elif 'notify' in props:
                             self.char_notify = char
-                            logger.info(f"uuid_notify: {self.uuid_notify}, properties: {props}")
+                            logger.info(f"char_notify: {char.uuid}, properties: {props}")
 
-            if self.uuid_write is None or self.uuid_notify is None:
-                raise Exception("Required write or notify characteristic not found")
+            if self.char_write is None and self.char_write_resp is None:
+                raise Exception("Required write characteristic not found")
+            if self.char_notify is None:
+                raise Exception("Required notify characteristic not found")
 
-            # Force service discovery to complete by accessing services
-            _ = client.services
-            await client.start_notify(self.uuid_notify, self._notify_callback)
+            await client.start_notify(self.char_notify, self._notify_callback)
             logger.info("start_notify")
 
             self._ble_client = client
@@ -471,7 +471,8 @@ class MQTT_BLEClient:
                 try:
                     cmd_data = self._command_queue.get_nowait()
                     logger.info(f'Writing command to BLE: {cmd_data.hex()}')
-                    await client.write_gatt_char(self.char_write, cmd_data, response=False)
+                    char = self.char_write if self.char_write else self.char_write_resp
+                    await client.write_gatt_char(char, cmd_data, response=(char is self.char_write_resp))
                     self._command_queue.task_done()
                 except asyncio.QueueEmpty:
                     pass
@@ -531,7 +532,7 @@ class MQTT_BLEClient:
         """Async status publisher (2Hz)."""
         while not self._shutdown_event.is_set():
             await self._publish_status()
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.5)
 
     async def run(self):
         """Main entry point — all async, single event loop."""
