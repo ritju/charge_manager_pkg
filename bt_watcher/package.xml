@@ -8,9 +8,9 @@
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
-  <depend>python3-aiomqtt</depend>
-  <depend>python3-bleak</depend>
-  <depend>python3-crcmod</depend>
+  <!-- <depend>python3-aiomqtt</depend> -->
+  <!-- <depend>python3-bleak</depend>
+  <depend>python3-crcmod</depend> -->
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
