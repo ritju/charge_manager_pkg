@@ -3,6 +3,7 @@ import json
 import time
 import logging
 import os
+import signal
 from logging.handlers import RotatingFileHandler
 import crcmod.predefined
 from bleak import BleakClient, BleakScanner
@@ -29,6 +30,18 @@ console_handler.setFormatter(logging.Formatter(
     '%(asctime)s - %(levelname)s - %(message)s'
 ))
 logger.addHandler(console_handler)
+
+# Hardware debug logger — dedicated file for BLE data only
+hw_logger = logging.getLogger('bt_watcher.hw')
+hw_logger.setLevel(logging.INFO)
+hw_logger.propagate = False  # Prevent logs from appearing in bt_watcher logger
+hw_handler = RotatingFileHandler(
+    os.path.expanduser('~/.local/share/bt_watcher/logs/hw_data.log'),
+    maxBytes=30 * 1024 * 1024,
+    backupCount=8
+)
+hw_handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+hw_logger.addHandler(hw_handler)
 
 
 async def _safe_disconnect(client):
@@ -58,8 +71,9 @@ class MQTT_BLEClient:
     def __init__(self, mqtt_broker="localhost", mqtt_port=1883):
         # State
         self.bluetooth_connected = False
-        self.uuid_notify = None
-        self.uuid_write = None
+        self.char_write = None
+        self.char_write_resp = None
+        self.char_notify = None
         self.send_heartbeat_data = ['6b', '00', '00', '00', '00', '6b', '00', '00', '00', '21', '09', '00']
         self.data_received_time = 0
         self.charge_state = {
@@ -85,9 +99,12 @@ class MQTT_BLEClient:
         self.mqtt_port = mqtt_port
 
         # Independent message-ID counters per topic
-        self._data_id = 0
         self._state_id = 0
         self._status_id = 0
+
+        # Last published values for change detection
+        self._last_status = None
+        self._last_state = None
 
     async def _publish_status(self):
         self._status_id += 1
@@ -98,7 +115,11 @@ class MQTT_BLEClient:
             "last_data_received": self.data_received_time
         }
         await self.mqtt_client.publish(self.TOPIC_STATUS, json.dumps(status), qos=1)
-        logger.info(f"Published status: id={self._status_id}, connected={self.bluetooth_connected}, mac={self.current_mac or 'N/A'}")
+        # Check if data (excluding id) has changed
+        status_data = {k: v for k, v in status.items() if k not in ("id", "last_data_received")}
+        if status_data != self._last_status:
+            logger.info(f"Published status: id={self._status_id}, connected={self.bluetooth_connected}, mac={self.current_mac or 'N/A'}")
+            self._last_status = status_data
 
     async def _publish_state(self):
         self._state_id += 1
@@ -112,12 +133,18 @@ class MQTT_BLEClient:
             "timestamp": time.time()
         }
         await self.mqtt_client.publish(self.TOPIC_STATE, json.dumps(state_payload), qos=1)
-        logger.info(f"Published state: id={self._state_id}, pid={self.charge_state['pid']}, charging={self.charge_state['is_charging']}, flooding={self.charge_state['is_waterflooding']}")
 
-    async def _publish_data(self, payload):
-        self._data_id += 1
-        payload["id"] = self._data_id
-        await self.mqtt_client.publish(self.TOPIC_DATA, json.dumps(payload), qos=1)
+        # Check if data (excluding id and timestamp) has changed
+        state_data = {k: v for k, v in state_payload.items() if k not in ("id", "timestamp")}
+        if state_data != self._last_state:
+            logger.info(f"Published state: id={self._state_id}, pid={self.charge_state['pid']}, charging={self.charge_state['is_charging']}, flooding={self.charge_state['is_waterflooding']}")
+            self._last_state = state_data
+
+    def _log_notify_data(self, payload):
+        crc = payload.get("crc_valid", "")
+        raw = payload.get("raw_hex", [])
+        ts = payload.get("timestamp", "")
+        hw_logger.info(f"mac={self.current_mac or 'N/A'} crc={crc} raw={raw} ts={ts}")
 
     async def _publish_response(self, request_id, topic, code, msg="", **extra):
         """Publish a response using the request's own ID and source topic."""
@@ -131,11 +158,36 @@ class MQTT_BLEClient:
             resp["msg"] = msg
         resp.update(extra)
         await self.mqtt_client.publish(self.TOPIC_RESPONSE, json.dumps(resp), qos=1)
+        logger.info(f"Response: request_id={request_id} topic={topic} code={code}")
 
     def _notify_callback(self, sender, data):
         """Synchronous callback from Bleak — bridge to async loop."""
         self.data_received_time = time.time()
         self._notify_queue.put_nowait(data)
+
+    async def _send_notify_response(self, client, is_heartbeat=False):
+        """Send 80 21 response to the charger after processing notify data.
+        
+        Frame format: 6B A0..A3 6B XXXXH 80H 21H xxxxxH D0..D7 CS 16H
+        - For heartbeat (no prior notify): use default template
+        - For notify response: echo address, seq, length, data from last received frame
+        """
+        # Response to notify: echo fields from last received frame
+        # udp_data format: [6B, A0.., ..., 6B, len_hi, len_lo, 00, 21, data..., CS, 16]
+        # Response:       [6B, A0.., ..., 6B, len_hi, len_lo, 80, 21, data..., CS, 16]
+        src = self.send_heartbeat_data
+        send_d = src[:8].copy()  # 6B + address + 6B
+        send_d.append('80')      # command code: 80 21 (response)
+        send_d.append('21')
+        send_d.append('01')
+        send_d.append('00')
+        send_d.append('00')
+        send_d.append(self.crc8(send_d))
+        send_d.append('16')
+        heart_bytes = bytes.fromhex(''.join(send_d))
+        char = self.char_write if self.char_write else self.char_write_resp
+        await client.write_gatt_char(char, heart_bytes, response=(char is self.char_write_resp))
+        self.data_received_time = time.time()
 
     async def _process_notify_data(self, data):
         """Async processing of BLE notification data."""
@@ -149,7 +201,7 @@ class MQTT_BLEClient:
 
         if len(data_list) < 10:
             logger.warning(f'data is too short: {data_list}')
-            await self._publish_data(raw_payload)
+            self._log_notify_data(raw_payload)
             return
 
         crc8_val = self.crc8(data_list[:-2])
@@ -170,7 +222,14 @@ class MQTT_BLEClient:
         else:
             logger.warning('CRC check failed')
 
-        await self._publish_data(raw_payload)
+        self._log_notify_data(raw_payload)
+
+        # Send 80 21 response after processing notify data
+        if self._ble_client:
+            try:
+                await self._send_notify_response(self._ble_client)
+            except Exception as e:
+                logger.error(f'Failed to send notify response: {e}')
 
     async def _send_charger_start(self):
         if not self.charge_state["pid"]:
@@ -257,24 +316,38 @@ class MQTT_BLEClient:
                                          "Missing 'mac' field")
             return
 
-        # Already connected to a DIFFERENT device? Cancel existing connection
-        if self.bluetooth_connected and self.current_mac != mac:
-            logger.warning(
-                f"Connect request for {mac}, currently connected to {self.current_mac}. Reconnecting..."
-            )
-            self._disconnect_flag = True
-            if self._ble_task and not self._ble_task.done():
-                self._ble_task.cancel()
-                try:
-                    await self._ble_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-            self._disconnect_flag = False
+        # Check if we already have an active BLE connection to this device
+        active_ble = self._ble_client is not None and getattr(self._ble_client, "is_connected", False)
 
-        # Connect first, then respond
+        # Case 1: Already connected to the same device with active BLE session
+        if self.current_mac == mac and active_ble:
+            # Restore state if it was lost (e.g., backend restart)
+            if not self.bluetooth_connected:
+                logger.info(f"Backend restarted: restoring connection state for {mac}")
+                self.bluetooth_connected = True
+
+            logger.info(f"Already connected to {mac}, reusing existing BLE session.")
+            self.charge_state["pid"] = mac
+            if self._ble_task is None or self._ble_task.done():
+                self._ble_task = asyncio.create_task(self._ble_run_loop())
+            await self._publish_response(
+                request_id, self.TOPIC_CONNECT, "ok",
+                f"Already connected to {mac}"
+            )
+            return
+
+        # Case 2: State says connected but BLE is inactive — clean up
+        if self.bluetooth_connected:
+            if self.current_mac == mac and not active_ble:
+                logger.warning(f"Stale connection state for {mac}, cleaning up")
+                await self._cleanup_connection()
+            elif self.current_mac != mac:
+                logger.warning(f"Switching from {self.current_mac} to {mac}")
+                await self._cleanup_connection()
+
+        # Perform new connection
         success = await self._ble_connect(mac)
         if success:
-            # Start the heartbeat loop in background
             await self._publish_response(
                 request_id, self.TOPIC_CONNECT, "ok",
                 f"Connected to {mac}"
@@ -285,6 +358,17 @@ class MQTT_BLEClient:
                 request_id, self.TOPIC_CONNECT, "connection_failed",
                 f"Failed to connect to {mac}"
             )
+
+    async def _cleanup_connection(self):
+        """Clean up current connection state and cancel BLE task."""
+        self._disconnect_flag = True
+        if self._ble_task and not self._ble_task.done():
+            self._ble_task.cancel()
+            try:
+                await self._ble_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._disconnect_flag = False
 
     async def _handle_disconnect(self, payload):
         request_id = payload.get("id")
@@ -315,34 +399,44 @@ class MQTT_BLEClient:
                 client = BleakClient(ble_device)
             else:
                 logger.warning(f'Device not found at {address}, trying direct connection')
-                client = BleakClient(address)
+                return False
 
             await client.connect()
+            await asyncio.sleep(1)
 
-            self.uuid_write = None
-            self.uuid_notify = None
+            self.char_write = None
+            self.char_write_resp = None
+            self.char_notify = None
             for service in client.services:
                 for char in service.characteristics:
                     props = char.properties
                     if isinstance(props, list):
-                        if 'write-without-response' in props or 'write' in props:
-                            self.uuid_write = char.uuid
-                            logger.info(f"uuid_write: {self.uuid_write}, properties: {props}")
-                        if 'read' in props and 'notify' in props:
-                            self.uuid_notify = char.uuid
-                            logger.info(f"uuid_notify: {self.uuid_notify}, properties: {props}")
+                        if 'write-without-response' in props:
+                            self.char_write = char
+                            logger.info(f"char_write (no-resp): {char.uuid}, properties: {props}")
+                        elif 'write' in props:
+                            self.char_write_resp = char
+                            logger.info(f"char_write_resp: {char.uuid}, properties: {props}")
+                        elif 'read' in props and 'notify' in props:
+                            self.char_notify = char
+                            logger.info(f"char_notify: {char.uuid}, properties: {props}")
                     elif isinstance(props, str):
-                        if 'write' in props:
-                            self.uuid_write = char.uuid
-                            logger.info(f"uuid_write: {self.uuid_write}, properties: {props}")
-                        if 'notify' in props:
-                            self.uuid_notify = char.uuid
-                            logger.info(f"uuid_notify: {self.uuid_notify}, properties: {props}")
+                        if 'write-without-response' in props:
+                            self.char_write = char
+                            logger.info(f"char_write (no-resp): {char.uuid}, properties: {props}")
+                        elif 'write' in props:
+                            self.char_write_resp = char
+                            logger.info(f"char_write_resp: {char.uuid}, properties: {props}")
+                        elif 'notify' in props:
+                            self.char_notify = char
+                            logger.info(f"char_notify: {char.uuid}, properties: {props}")
 
-            if self.uuid_write is None or self.uuid_notify is None:
-                raise Exception("Required write or notify characteristic not found")
+            if self.char_write is None and self.char_write_resp is None:
+                raise Exception("Required write characteristic not found")
+            if self.char_notify is None:
+                raise Exception("Required notify characteristic not found")
 
-            await client.start_notify(self.uuid_notify, self._notify_callback)
+            await client.start_notify(self.char_notify, self._notify_callback)
             logger.info("start_notify")
 
             self._ble_client = client
@@ -369,9 +463,6 @@ class MQTT_BLEClient:
         try:
             heartbeat_time = 0
             while True:
-                if not client.is_connected:
-                    logger.error('BLE disconnected unexpectedly')
-                    break
                 if self._disconnect_flag:
                     logger.info('Received disconnect request')
                     break
@@ -379,7 +470,9 @@ class MQTT_BLEClient:
                 # Drain pending commands
                 try:
                     cmd_data = self._command_queue.get_nowait()
-                    await client.write_gatt_char(self.uuid_write, cmd_data, response=False)
+                    logger.info(f'Writing command to BLE: {cmd_data.hex()}')
+                    char = self.char_write if self.char_write else self.char_write_resp
+                    await client.write_gatt_char(char, cmd_data, response=(char is self.char_write_resp))
                     self._command_queue.task_done()
                 except asyncio.QueueEmpty:
                     pass
@@ -393,27 +486,15 @@ class MQTT_BLEClient:
                     except asyncio.QueueEmpty:
                         break
 
-                # Heartbeat
-                current_time = time.time()
-                if current_time - heartbeat_time > 0.5:
-                    send_d = self.send_heartbeat_data.copy()
-                    send_d[8] = '80'
-                    send_d[9] = '21'
-                    send_d[10] = '01'
-                    send_d[11] = '00'
-                    send_d.append('00')
-                    send_d.append(self.crc8(send_d))
-                    send_d.append('16')
-                    heart_bytes = bytes.fromhex(''.join(send_d))
-                    await client.write_gatt_char(self.uuid_write, heart_bytes, response=False)
-                    heartbeat_time = current_time
-
                 await asyncio.sleep(0.5)
 
         except asyncio.CancelledError:
             logger.info("BLE task cancelled")
         except Exception as e:
             logger.error(f'BLE communication error: {str(e)}')
+            logger.error(f'Error type: {type(e).__name__}')
+            import traceback
+            logger.error(traceback.format_exc())
         finally:
             await self._ble_cleanup()
 
@@ -451,7 +532,7 @@ class MQTT_BLEClient:
         """Async status publisher (2Hz)."""
         while not self._shutdown_event.is_set():
             await self._publish_status()
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.5)
 
     async def run(self):
         """Main entry point — all async, single event loop."""
@@ -481,7 +562,7 @@ class MQTT_BLEClient:
             except Exception as e:
                 logger.error(f"MQTT connection error: {e}")
                 logger.info("Reconnecting in 5 seconds...")
-                await asyncio.sleep(5)
+                await asyncio.sleep(4)
 
         # Cleanup
         if self._ble_task and not self._ble_task.done():
@@ -507,6 +588,16 @@ class MQTT_BLEClient:
 
 async def async_main():
     node = MQTT_BLEClient()
+
+    loop = asyncio.get_event_loop()
+
+    def _signal_handler():
+        logger.info("Received shutdown signal")
+        node.shutdown()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _signal_handler)
+
     await node.run()
 
 
