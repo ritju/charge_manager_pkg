@@ -467,6 +467,11 @@ class MQTT_BLEClient:
                     logger.info('Received disconnect request')
                     break
 
+                # Check if no data received for over 1 minute
+                if self.data_received_time > 0 and (time.time() - self.data_received_time) > 60:
+                    logger.warning('No BLE data received for over 1 minute, disconnecting')
+                    break
+
                 # Drain pending commands
                 try:
                     cmd_data = self._command_queue.get_nowait()
@@ -512,6 +517,13 @@ class MQTT_BLEClient:
                 break
         await _safe_disconnect(self._ble_client)
         self._ble_client = None
+
+        # Publish updated state and status to reflect disconnection
+        try:
+            await self._publish_state()
+            await self._publish_status()
+        except Exception as e:
+            logger.warning(f"Failed to publish state/status after cleanup: {e}")
 
     async def _mqtt_loop(self, mqtt_client):
         """Listen to MQTT messages and dispatch to handlers."""
