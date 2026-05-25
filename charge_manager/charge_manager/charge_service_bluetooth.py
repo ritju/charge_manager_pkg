@@ -18,6 +18,8 @@ from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallb
 from rclpy.executors import MultiThreadedExecutor
 import fcntl
 
+import re
+
 
 class BluetoothChargeServer(Node):
     def __init__(self, name):
@@ -76,6 +78,8 @@ class BluetoothChargeServer(Node):
 
         self.charge_state_publish_thread = threading.Thread(target=self.charge_state_pub, daemon=True)
         self.charge_state_publish_thread.start()
+
+        self.bluetooth_adapter = "hci0"
 
         self.get_logger().info("Bluetooth charge Server starting")
 
@@ -443,8 +447,30 @@ class BluetoothChargeServer(Node):
         finally:
             self._connect_lock.release()
 
+    def get_bluetooth_adapter_simple(self):
+        """简单获取第一个 hci 设备"""
+        try:
+            result = subprocess.run(
+                ['hciconfig'], 
+                capture_output=True, 
+                text=True
+            )
+            # 匹配 hci0: 或 hci1: 等
+            match = re.search(r'(hci\d+):', result.stdout)
+            if match:
+                adapter = match.group(1)
+                self.get_logger().info(f"检测到蓝牙适配器: {adapter}")
+                return adapter
+        except Exception as e:
+            self.get_logger().info(f"获取适配器失败: {e}")
+        return "hci0"
+
     async def create_bleakclient(self, address):
         client = None
+
+        self.get_logger().info("获取蓝牙设备名字")
+        self.bluetooth_adapter = self.get_bluetooth_adapter_simple()
+
         try:
             self.get_logger().info("搜索附近的蓝牙......")
             devices = await BleakScanner(scanning_mode='active').discover(return_adv=True, timeout=5.0)
@@ -465,10 +491,10 @@ class BluetoothChargeServer(Node):
                 self.get_logger().info(f'address: {ble_device.address}')
                 self.get_logger().info(f'name: {ble_device.name}')
                 self.get_logger().info(f'rssi: {devices[address][1].rssi}')
-                client = BleakClient(ble_device)
+                client = BleakClient(ble_device, adapter=self.bluetooth_adapter)
             else:
                 self.get_logger().info(f'未搜索到mac: {address}，尝试直接连接')
-                client = BleakClient(address)
+                client = BleakClient(address, adapter=self.bluetooth_adapter)
 
             with self._client_lock:
                 self._client = client
