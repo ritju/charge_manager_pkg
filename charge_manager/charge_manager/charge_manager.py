@@ -75,6 +75,8 @@ class chargeManager(Node):
         add_water_ctr_qos.history = HistoryPolicy.KEEP_LAST
         add_water_ctr_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
         self.add_water_ctr_sub_ = self.create_subscription(Bool, '/add_water_ctr', self.add_water_ctr_sub_callback, add_water_ctr_qos, callback_group=callback_group_type)
+
+        self.manual_add_water_ctr_sub_ = self.create_subscription(Bool, '/manual_add_water_ctr', self.manual_add_water_ctr_sub_callback, add_water_ctr_qos, callback_group=callback_group_type)
         
         # 初始化 /charger/state publisher        
         self.charger_state_publisher = self.create_publisher(ChargeState, '/charger/state', charger_state_qos2, callback_group=callback_group_type)
@@ -191,7 +193,18 @@ class chargeManager(Node):
             msg = BluetoothCommand()
             msg.command = BluetoothCommand.WATER_STOP
             self.command_publisher.publish(msg)
-            
+
+    def manual_add_water_ctr_sub_callback(self, msg):
+        if msg.data == True:
+            self.get_logger().info(f'received the topic /manual_add_water_ctr with value {msg.data}')
+            msg = BluetoothCommand()
+            msg.command = BluetoothCommand.ENABLE_MANUAL_ADD_WATER
+            self.command_publisher.publish(msg)
+        else:
+            self.get_logger().info(f'received the topic /manual_add_water_ctr with value {msg.data}')
+            msg = BluetoothCommand()
+            msg.command = BluetoothCommand.DISABLE_MANUAL_ADD_WATER
+            self.command_publisher.publish(msg)            
     
     def charger_id_sub_callback(self, msg):
         if msg.data != '':
