@@ -221,8 +221,14 @@ class BluetoothChargeServer(Node):
                 send_d[10] = '03'   # 数据域长度
                 send_d[11] = '00'
                 send_d.append('01') # 开启充电
-                send_d.append('02')
-                send_d.append('02')
+                if self.charge_state.is_waterflooding:
+                    send_d.append('01')
+                else:                    
+                    send_d.append('00')
+                if self.charge_state.manual_enable_stu:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')
                 send_d.append(self.crc8(send_d))
                 send_d.append('16')
             else:                
@@ -258,8 +264,14 @@ class BluetoothChargeServer(Node):
                 send_d[10] = '03' # 数据域长度
                 send_d[11] = '00'
                 send_d.append('00') # 关闭充电
-                send_d.append('02')
-                send_d.append('02')
+                if self.charge_state.is_waterflooding:
+                    send_d.append('01')
+                else:                    
+                    send_d.append('00')
+                if self.charge_state.manual_enable_stu:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')
                 send_d.append(self.crc8(send_d))
                 send_d.append('16')
             else:
@@ -298,9 +310,15 @@ class BluetoothChargeServer(Node):
                 send_d[9] = '00'
                 send_d[10] = '03'    # 数据域长度
                 send_d[11] = '00'
-                send_d.append('02') 
+                if self.charge_state.is_charging:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')
                 send_d.append('01')  # 开启加水
-                send_d.append('02')
+                if self.charge_state.manual_enable_stu:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')
                 send_d.append(self.crc8(send_d))
                 send_d.append('16')
             else:
@@ -336,9 +354,15 @@ class BluetoothChargeServer(Node):
                 send_d[9] = '00'
                 send_d[10] = '03'    # 数据域长度
                 send_d[11] = '00'
-                send_d.append('02') 
+                if self.charge_state.is_charging:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')
                 send_d.append('00')  # 关闭加水
-                send_d.append('02')
+                if self.charge_state.manual_enable_stu:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')
                 send_d.append(self.crc8(send_d))
                 send_d.append('16')
             else:
@@ -363,7 +387,7 @@ class BluetoothChargeServer(Node):
                     time.sleep(1)
 
         # 允许开启手动加水功能
-        if msgs.command == BluetoothCommand.ALLOW_MANAUL_ADD_WATER:
+        if msgs.command == BluetoothCommand.ENABLE_MANUAL_ADD_WATER:
             time.sleep(0.5)
             self.get_logger().info('收到允许手动加水命令')
             if not self.charge_state.has_contact:
@@ -378,8 +402,14 @@ class BluetoothChargeServer(Node):
                 send_d[9] = '00'
                 send_d[10] = '03'   # 数据域长度
                 send_d[11] = '00'
-                send_d.append('02') 
-                send_d.append('02')
+                if self.charge_state.is_charging:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')
+                if self.charge_state.is_waterflooding:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')                    
                 send_d.append('01') # 允许手动加水功能
                 send_d.append(self.crc8(send_d))
                 send_d.append('16')
@@ -410,8 +440,14 @@ class BluetoothChargeServer(Node):
                 send_d[9] = '00'
                 send_d[10] = '03' # 数据域长度
                 send_d[11] = '00'
-                send_d.append('02') 
-                send_d.append('02')
+                if self.charge_state.is_charging:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')
+                if self.charge_state.is_waterflooding:
+                    send_d.append('01')
+                else:
+                    send_d.append('00')     
                 send_d.append('00') # 禁止手动加水功能
                 send_d.append(self.crc8(send_d))
                 send_d.append('16')
