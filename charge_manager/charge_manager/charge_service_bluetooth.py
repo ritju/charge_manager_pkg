@@ -35,6 +35,7 @@ class BluetoothChargeServer(Node):
             self.use_bluetooth_restore_service = False
         
         env_var = os.environ.get('DOCK_USE_BLUETOOTH_PROTOCOL_NEW', 'False')
+        self.declare_parameter("use_bluetooth_protocol_new", env_var)
         self.use_bluetooth_protocol_new = self.get_parameter("use_bluetooth_protocol_new").get_parameter_value().string_value.strip().lower()
         if self.use_bluetooth_protocol_new in ('true', 'yes', 'on', '1', 't', 'y', 'enabled'):
             self.get_logger().info('use_bluetooth_protocol_new: True')
