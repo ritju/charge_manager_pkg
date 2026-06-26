@@ -179,6 +179,7 @@ class chargeManager(Node):
         self.charger_state.is_charging = msg.is_charging
         self.charger_state.is_waterflooding = msg.is_waterflooding
         self.charger_state.water_mode = msg.water_mode
+        self.charger_state.manual_enable_stu = msg.manual_enable_stu
         if msg.has_contact:
             self.charger_state.is_docking = False
     
