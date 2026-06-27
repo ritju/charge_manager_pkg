@@ -20,9 +20,25 @@ import fcntl
 
 import re
 
+from charge_manager.utils import parse_fault, calculate_dis
 
 class BluetoothChargeServer(Node):
     def __init__(self, name):
+        # 定义外部映射表
+        self.fault_map = {
+            0x01: "无法关闭加水电磁阀",
+            0x02: "一直处于手动加水状态",
+            0x04: "无法关闭充电",
+            0x08: "左距离传感器不在线（有延时）",
+            0x10: "右距离传感器不在线（有延时）",
+            0x20: "距离传感器到位，行程开关不到位，可能存在行程开关故障/不在线",
+            0x40: "行程开关到位，但距离传感器没到位"
+        }
+        self.switch_stu_map = {
+            0x00: "行程到位",
+            0x01: "行程未到位",
+        }
+        
         super().__init__(name)
         env_var = os.environ.get('DOCK_USE_BLUETOOTH_RESTORE_SERVICE', 'False')
         self.declare_parameter("use_bluetooth_restore_service", env_var)
@@ -757,19 +773,25 @@ class BluetoothChargeServer(Node):
             if data_list[8:10] == ['00', '21']:
                 try:
                     if self.use_bluetooth_protocol_new:
-                        self.charge_state.is_charging = (data_list[12] == '01')
-                        self.charge_state.has_contact = (data_list[17] == '01')
+                        data_length = calculate_dis(data_list[10], data_list[11])
+                        data_fileds = data_list[12:12+data_length]
+                        self.charge_state.is_charging = (data_fileds[0] == '01')
+                        self.charge_state.has_contact = (data_fileds[5] == '01')
                         # 00 未加水， 01 自动加水， 02 手动加水
-                        self.charge_state.is_waterflooding = ((data_list[18] == '01') or (data_list[18] == '02'))
-                        if data_list[18] == '01':
+                        self.charge_state.is_waterflooding = ((data_fileds[6] == '01') or (data_fileds[6] == '02'))
+                        if data_fileds[6] == '01':
                             self.charge_state.water_mode = "auto"
-                        elif data_list[18] == '02':
+                        elif data_fileds[6] == '02':
                             self.charge_state.water_mode = "manual"
-                        elif data_list[18] == '00':
+                        elif data_fileds[6] == '00':
                             self.charge_state.water_mode = "idle"
                         else:
                             self.charge_state.water_mode = "unknown"
-                        self.charge_state.manual_enable_stu = (data_list[19] == '01')
+                        self.charge_state.manual_enable_stu = (data_fileds[7] == '01')
+                        self.charge_satate.fault_stu = parse_fault(data_fileds[8], self.fault_map, "无故障")
+                        self.charge_state.left_dis_sensor = calculate_dis(data_fileds[9], data_fileds[10])
+                        self.charge_state.right_dis_sensor = calculate_dis(data_fileds[11], data_fileds[12])
+                        self.charge_state.switch_stu = parse_fault(data_fileds[13], self.switch_map, "未知代码")
                     else:
                         self.charge_state.is_charging = (data_list[12] == '01')
                         self.charge_state.has_contact = (data_list[17] == '01')

@@ -4,3 +4,7 @@ bool is_charging
 bool is_waterflooding
 string water_mode
 bool manual_enable_stu
+string fault_stu
+int32 left_dis_sensor
+int32 right_dis_sensor
+string switch_stu
