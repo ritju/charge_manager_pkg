@@ -85,6 +85,10 @@ class BluetoothChargeServer(Node):
         self.charge_state.is_waterflooding = False
         self.charge_state.water_mode = "unknown"
         self.charge_state.manual_enable_stu = False
+        self.charge_state.fault_stu = ""
+        self.charge_state.left_dis_sensor = -1
+        self.charge_state.right_dis_sensor = -1
+        self.charge_state.switch_stu = ""
         self.contact_state_last_ = False
 
         self.charge_state_publisher = self.create_publisher(ChargeState2, '/charger/state2', charger_state_qos, callback_group=ReentrantCallbackGroup())
@@ -193,6 +197,10 @@ class BluetoothChargeServer(Node):
                 self.charge_state.is_waterflooding = False
                 self.charge_state.water_mode = "unknown"
                 self.charge_state.manual_enable_stu = False
+                self.charge_state.fault_stu = ""
+                self.charge_state.left_dis_sensor = -1
+                self.charge_state.right_dis_sensor = -1
+                self.charge_state.switch_stu = ""
 
             self.charge_state_publisher.publish(self.charge_state)
 
@@ -209,6 +217,10 @@ class BluetoothChargeServer(Node):
                 self.charge_state.is_waterflooding = False
                 self.charge_state.water_mode = "unknown"
                 self.charge_state.manual_enable_stu = False
+                self.charge_state.fault_stu = ""
+                self.charge_state.left_dis_sensor = -1
+                self.charge_state.right_dis_sensor = -1
+                self.charge_state.switch_stu = ""
                 self.disconnect_bluetooth = True
                 self.bluetooth_connected = False
                 self.heartbeat_time = 0
@@ -585,6 +597,10 @@ class BluetoothChargeServer(Node):
             self.charge_state.is_charging = False
             self.charge_state.water_mode = "unknown"
             self.charge_state.manual_enable_stu = False
+            self.charge_state.fault_stu = ""
+            self.charge_state.left_dis_sensor = -1
+            self.charge_state.right_dis_sensor = -1
+            self.charge_state.switch_stu = ""
             self.bluetooth_connected = None
             self.disconnect_bluetooth = False
 
@@ -774,24 +790,25 @@ class BluetoothChargeServer(Node):
                 try:
                     if self.use_bluetooth_protocol_new:
                         data_length = calculate_dis(data_list[10], data_list[11])
-                        data_fileds = data_list[12:12+data_length]
-                        self.charge_state.is_charging = (data_fileds[0] == '01')
-                        self.charge_state.has_contact = (data_fileds[5] == '01')
+                        data_fields = data_list[12:12+data_length]
+                        self.charge_state.is_charging = (data_fields[0] == '01')
+                        self.charge_state.has_contact = (data_fields[5] == '01')
                         # 00 未加水， 01 自动加水， 02 手动加水
-                        self.charge_state.is_waterflooding = ((data_fileds[6] == '01') or (data_fileds[6] == '02'))
-                        if data_fileds[6] == '01':
+                        self.charge_state.is_waterflooding = ((data_fields[6] == '01') or (data_fields[6] == '02'))
+                        if data_fields[6] == '01':
                             self.charge_state.water_mode = "auto"
-                        elif data_fileds[6] == '02':
+                        elif data_fields[6] == '02':
                             self.charge_state.water_mode = "manual"
-                        elif data_fileds[6] == '00':
+                        elif data_fields[6] == '00':
                             self.charge_state.water_mode = "idle"
                         else:
                             self.charge_state.water_mode = "unknown"
-                        self.charge_state.manual_enable_stu = (data_fileds[7] == '01')
-                        self.charge_satate.fault_stu = parse_fault(data_fileds[8], self.fault_map, "无故障")
-                        self.charge_state.left_dis_sensor = calculate_dis(data_fileds[9], data_fileds[10])
-                        self.charge_state.right_dis_sensor = calculate_dis(data_fileds[11], data_fileds[12])
-                        self.charge_state.switch_stu = parse_fault(data_fileds[13], self.switch_map, "未知代码")
+                        self.charge_state.manual_enable_stu = (data_fields[7] == '01')
+                        self.charge_state.fault_stu = parse_fault(data_fields[8], self.fault_map, "无故障")
+                        self.charge_state.left_dis_sensor = calculate_dis(data_fields[9], data_fields[10])
+                        self.charge_state.right_dis_sensor = calculate_dis(data_fields[11], data_fields[12])
+                        switch_stu_value = int(data_fields[13], 16)                         
+                        self.charge_state.switch_stu = self.switch_stu_map.get(switch_stu_value, "未知错误")
                     else:
                         self.charge_state.is_charging = (data_list[12] == '01')
                         self.charge_state.has_contact = (data_list[17] == '01')
