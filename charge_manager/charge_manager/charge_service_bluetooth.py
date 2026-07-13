@@ -122,38 +122,49 @@ class BluetoothChargeServer(Node):
     def disconnect_bluetooth_callback(self, request, response):
         start_time = time.time()
         self.get_logger().info('received a request for /disconnect_bluetooth')
+
+        if not self._connect_lock.acquire(blocking=False):
+            response.success = False
+            response.infos = "Another operation in progress"
+            response.cost_time = round(time.time() - start_time, 1)
+            self.get_logger().info("when disconnecting from Bluetooth, another operation is in progress")
+            return response
         
-        # 1. 设置标志，防止协程继续发送数据
-        self.disconnect_bluetooth = True
-        
-        # 2. 主动断开正在运行的 BLE 任务
-        with self._client_lock:
-            client = self._client
-        if client is not None and client.is_connected:
-            try:
-                # 在事件循环中执行断开
-                future = asyncio.run_coroutine_threadsafe(client.disconnect(), self.loop)
-                future.result(timeout=3.0)  # 等待断开完成
-            except Exception as e:
-                self.get_logger().info(f'主动断开异常: {e}')
-        
-        # 3. 取消正在进行的连接/通信协程
-        if self._ble_task and not self._ble_task.done():
-            self._ble_task.cancel()
-            try:
-                self._ble_task.result(timeout=2.0)
-            except Exception as e:
-                self.get_logger().info(f'取消正在进行的连接/通信协程异常: {e}')
-        
-        # 4. 强制清空状态（避免残留）
-        self.charge_state.pid = ''
-        self.bluetooth_connected = False
-        self.heartbeat_time = 0
-        
-        response.success = True
-        response.infos = '断开蓝牙连接成功。'
-        response.cost_time = round(time.time() - start_time, 1)
-        return response
+        try:
+            # 1. 设置标志，防止协程继续发送数据
+            self.disconnect_bluetooth = True
+            
+            # 2. 主动断开正在运行的 BLE 任务
+            with self._client_lock:
+                client = self._client
+            if client is not None and client.is_connected:
+                try:
+                    # 在事件循环中执行断开
+                    future = asyncio.run_coroutine_threadsafe(client.disconnect(), self.loop)
+                    future.result(timeout=3.0)  # 等待断开完成
+                except Exception as e:
+                    self.get_logger().info(f'主动断开异常: {e}')
+            
+            # 3. 取消正在进行的连接/通信协程
+            if self._ble_task and not self._ble_task.done():
+                self._ble_task.cancel()
+                try:
+                    self._ble_task.result(timeout=2.0)
+                except Exception as e:
+                    self.get_logger().info(f'取消正在进行的连接/通信协程异常: {e}')
+            
+            # 4. 强制清空状态（避免残留）
+            self.charge_state.pid = ''
+            self.bluetooth_connected = False
+            self.heartbeat_time = 0
+            
+            response.success = True
+            response.infos = '断开蓝牙连接成功。'
+            response.cost_time = round(time.time() - start_time, 1)
+            self.get_logger().info(f'断开蓝牙连接成功。耗时: {response.cost_time}s')
+            return response
+        finally:
+            self._connect_lock.release()
 
     def terminate(self, proc: subprocess.Popen):
         parent_pid = proc.pid 
@@ -519,8 +530,8 @@ class BluetoothChargeServer(Node):
 
         if not self._connect_lock.acquire(blocking=False):
             response.success = False
-            response.result = "Another connection operation in progress"
-            self.get_logger().info("Another connection operation in progress")
+            response.result = "Another operation in progress"
+            self.get_logger().info("When connecting to Bluetooth, another operation is in progress")
             response.connection_time = 0.0
             return response
 
@@ -530,7 +541,7 @@ class BluetoothChargeServer(Node):
                 response.success = True
                 response.connection_time = 0.0
                 response.result = f"Already connected to {request.mac}"
-                self.get_logger().info("Already connected to {request.mac}")
+                self.get_logger().info(f"Already connected to {request.mac}")
                 return response
 
             if self._ble_task is not None and not self._ble_task.done():
