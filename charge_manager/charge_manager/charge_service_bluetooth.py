@@ -68,7 +68,7 @@ class BluetoothChargeServer(Node):
         self.heartbeat_time = 0
         self.data_received_time = 0
         self.disconnect_bluetooth = False
-        self.bluetooth_found = False
+        self.bluetooth_found = False        
 
         self.bluetooth_concact_server = self.create_service(ConnectBluetooth, '/connect_bluetooth', self.connect_bluetooth, callback_group=ReentrantCallbackGroup())
         self.bluetooth_disconnect_server = self.create_service(DisconnectBluetooth, '/disconnect_bluetooth', self.disconnect_bluetooth_callback, callback_group=MutuallyExclusiveCallbackGroup())
@@ -79,6 +79,7 @@ class BluetoothChargeServer(Node):
         charger_state_qos.durability = DurabilityPolicy.VOLATILE
 
         self.charge_state = ChargeState2()
+        self.data_fields_last = []
         self.charge_state.pid = ""
         self.charge_state.has_contact = False
         self.charge_state.is_charging = False
@@ -92,7 +93,7 @@ class BluetoothChargeServer(Node):
         self.contact_state_last_ = False
 
         self.charge_state_publisher = self.create_publisher(ChargeState2, '/charger/state2', charger_state_qos, callback_group=ReentrantCallbackGroup())
-        self.publish_rate = self.create_rate(20)
+        self.publish_rate = self.create_rate(5)
         self.start_stop_charge_server = self.create_subscription(BluetoothCommand, '/bluetooth_command', self.start_stop_charge_callback, 5, callback_group=ReentrantCallbackGroup())
         self.udp_data = None
 
@@ -201,7 +202,17 @@ class BluetoothChargeServer(Node):
 
             with self._client_lock:
                 client = self._client
+            
+            if self.contact_state_last_:
+                if client is None or not client.is_connected:
+                    self.get_logger().info('BLE client is not connected, resetting charge state...')
+                    if client is None:
+                        self.get_logger().info('BLE client is None')
+                    elif not client.is_connected:
+                        self.get_logger().info('BLE client is not connected')
+                        
             if client is None or not client.is_connected:
+                self.data_fields_last = []
                 self.charge_state.pid = ''
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
@@ -222,6 +233,7 @@ class BluetoothChargeServer(Node):
             if (self.bluetooth_connected and self.data_received_time > 0 
                     and time.time() - self.data_received_time > 20):
                 self.get_logger().info("No data received more than 20 seconds.")
+                self.data_fields_last = []
                 self.charge_state.pid = ''
                 self.charge_state.has_contact = False
                 self.charge_state.is_charging = False
@@ -603,9 +615,11 @@ class BluetoothChargeServer(Node):
             self.data_received_time = 0
             self.connect_start_time = time.time()
             self.connect_exception = ""
+            self.data_fields_last = []
             self.charge_state.pid = ''
             self.charge_state.has_contact = False
             self.charge_state.is_charging = False
+            self.charge_state.is_waterflooding = False
             self.charge_state.water_mode = "unknown"
             self.charge_state.manual_enable_stu = False
             self.charge_state.fault_stu = ""
@@ -799,9 +813,15 @@ class BluetoothChargeServer(Node):
             self.udp_data = data_list
             if data_list[8:10] == ['00', '21']:
                 try:
-                    if self.use_bluetooth_protocol_new:
-                        data_length = calculate_dis(data_list[10], data_list[11])
-                        data_fields = data_list[12:12+data_length]
+                    data_length = calculate_dis(data_list[10], data_list[11])
+                    data_fields = data_list[12:12+data_length]
+                    data_fields_save = data_list[12:20]
+                    if data_fields_save != self.data_fields_last:
+                        self.get_logger().info(f'数据域发生变化')
+                        self.get_logger().info(f'上一次数据域内容是: {self.data_fields_last}')
+                        self.get_logger().info(f'这一次数据域内容是: {data_fields_save}')
+                        self.data_fields_last = data_fields_save
+                    if self.use_bluetooth_protocol_new:                        
                         self.charge_state.is_charging = (data_fields[0] == '01')
                         self.charge_state.has_contact = (data_fields[5] == '01')
                         # 00 未加水， 01 自动加水， 02 手动加水
