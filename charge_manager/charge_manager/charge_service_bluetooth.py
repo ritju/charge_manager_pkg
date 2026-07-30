@@ -203,7 +203,7 @@ class BluetoothChargeServer(Node):
             with self._client_lock:
                 client = self._client
             
-            if self.contact_state_last_:
+            if self.data_fields_last:
                 if client is None or not client.is_connected:
                     self.get_logger().info('BLE client is not connected, resetting charge state...')
                     if client is None:
@@ -211,18 +211,17 @@ class BluetoothChargeServer(Node):
                     elif not client.is_connected:
                         self.get_logger().info('BLE client is not connected')
                         
-            if client is None or not client.is_connected:
-                self.data_fields_last = []
-                self.charge_state.pid = ''
-                self.charge_state.has_contact = False
-                self.charge_state.is_charging = False
-                self.charge_state.is_waterflooding = False
-                self.charge_state.water_mode = "unknown"
-                self.charge_state.manual_enable_stu = False
-                self.charge_state.fault_stu = ""
-                self.charge_state.left_dis_sensor = -1
-                self.charge_state.right_dis_sensor = -1
-                self.charge_state.switch_stu = ""
+                    self.data_fields_last = []
+                    self.charge_state.pid = ''
+                    self.charge_state.has_contact = False
+                    self.charge_state.is_charging = False
+                    self.charge_state.is_waterflooding = False
+                    self.charge_state.water_mode = "unknown"
+                    self.charge_state.manual_enable_stu = False
+                    self.charge_state.fault_stu = ""
+                    self.charge_state.left_dis_sensor = -1
+                    self.charge_state.right_dis_sensor = -1
+                    self.charge_state.switch_stu = ""
 
             self.charge_state_publisher.publish(self.charge_state)
 
