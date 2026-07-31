@@ -814,7 +814,7 @@ class BluetoothChargeServer(Node):
                 try:
                     data_length = calculate_dis(data_list[10], data_list[11])
                     data_fields = data_list[12:12+data_length]
-                    data_fields_save = data_list[12:20]
+                    data_fields_save = data_list[12:21]
                     if data_fields_save != self.data_fields_last:
                         self.get_logger().info(f'数据域发生变化')
                         self.get_logger().info(f'上一次数据域内容是: {self.data_fields_last}')
