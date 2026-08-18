@@ -60,6 +60,10 @@ class BluetoothChargeServer(Node):
             self.get_logger().info('use_bluetooth_protocol_new: False')
             self.use_bluetooth_protocol_new = False
 
+        env_var = os.environ.get('CHARACTER_FILTER', None)
+        self.declare_parameter("character_filter", env_var)
+        self.character_filter = self.get_parameter("character_filter").get_parameter_value().string_value.strip().lower()
+
         self.bluetooth_connected = False
         self.uuid_notify = None
         self.uuid_write = None
@@ -732,12 +736,22 @@ class BluetoothChargeServer(Node):
                 for character in service.characteristics:
                     # 获取发送数据的蓝牙服务uuid
                     if character.properties == ['write-without-response', 'write']:
-                        self.uuid_write = character.uuid
-                        self.get_logger().info(f"uuid_write: {self.uuid_write}, properties: {character.properties}")
+                        if self.character_filter:
+                            if character.uuid.startswith(self.character_filter) and self.uuid_write is None:
+                                self.uuid_write = character.uuid
+                                self.get_logger().info(f"uuid_write: {self.uuid_write}, properties: {character.properties}")
+                        else:
+                            self.uuid_write = character.uuid
+                            self.get_logger().info(f"uuid_write: {self.uuid_write}, properties: {character.properties}")
                     # 获取接收数据的蓝牙服务uuid
                     elif character.properties == ['read', 'notify']:
-                        self.uuid_notify = character.uuid                        
-                        self.get_logger().info(f"uuid_notify: {self.uuid_notify}, properties: {character.properties}")
+                        if self.character_filter:
+                            if character.uuid.startswith(self.character_filter) and self.uuid_notify is None:
+                                self.uuid_notify = character.uuid 
+                                self.get_logger().info(f"uuid_notify: {self.uuid_notify}, properties: {character.properties}")
+                        else:
+                            self.uuid_notify = character.uuid 
+                            self.get_logger().info(f"uuid_notify: {self.uuid_notify}, properties: {character.properties}")
                     else:
                         continue
 
