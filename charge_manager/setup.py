@@ -1,5 +1,6 @@
 from setuptools import find_packages, setup
 import os
+from glob import glob
 
 package_name = 'charge_manager'
 
@@ -20,6 +21,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
          # 动态添加restore文件夹下的所有txt文件
         ('share/' + package_name + '/restore', restore_files),
+        # 添加 launch 文件
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

@@ -3,3 +3,7 @@ __pycache__
 *.log
 
 .vscode
+.mimocode
+install/
+log/
+build/

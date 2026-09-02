@@ -261,6 +261,11 @@ class ChargeAction(Node):
         # 滑动窗口相关
         self.raw_vel_window = collections.deque()   # 存储 (timestamp, exceed_bool)
         self.raw_vel_lock = threading.Lock()
+
+        # /charger/start_docking2 传入的额外参数
+        self.request_marker = ''
+        self.request_protocol = ''
+        self.request_delta = None
         
 
     def is_undocking_state_sub_callback(self, msg):
@@ -466,16 +471,20 @@ class ChargeAction(Node):
                 self.charge_type = 'auto'
             elif goal_request.type == 1:
                 self.charge_type = 'manual'
-        
+
         self.get_logger().info(f'Received a new /Charge action request, type: {self.charge_type}')
         if self.msg_state_pub.data:
             self.get_logger().info('The /charge action server is executing Charge action. Reject')
             return GoalResponse.REJECT
         else:
             self.mac = goal_request.mac
+            self.request_marker = goal_request.marker
+            self.request_protocol = goal_request.protocol
+            self.request_delta = goal_request.delta
             self.get_logger().info('charge_action_goal_callback')
             self.get_logger().info(f'self.mac: {self.mac}')
-            self.msg_state_pub.data = True            
+            self.get_logger().info(f'marker: {self.request_marker}, protocol: {self.request_protocol}')
+            self.msg_state_pub.data = True
             self.get_logger().info('The /charge action server is idle, accepted and executing.')
             return GoalResponse.ACCEPT
 
@@ -492,6 +501,10 @@ class ChargeAction(Node):
         self.mac = goal_handle.request.mac
         re_restore = goal_handle.request.restore
         re_charge_type = goal_handle.request.type
+        self.request_marker = goal_handle.request.marker
+        self.request_protocol = goal_handle.request.protocol
+        self.request_delta = goal_handle.request.delta
+        self.get_logger().info(f'request_marker: {self.request_marker}, request_protocol: {self.request_protocol}')
         if re_restore or re_charge_type:
             self.dock_completed = True
             self.charger_position_bool = True

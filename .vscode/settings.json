@@ -1,30 +1,31 @@
 {
     "python.analysis.extraPaths": [
-        "/workspaces/capella_ros_docker/build/video_control_speed",
-        "/workspaces/capella_ros_docker/build/nav2_simple_commander",
-        "/workspaces/capella_ros_docker/build/lidar_detect_person",
-        "/workspaces/capella_ros_docker/build/dabai_client",
-        "/workspaces/capella_ros_docker/build/crowd_statistics",
-        "/workspaces/capella_ros_docker/build/charge_manager",
-        "/workspaces/capella_ros_docker/build/capella_charge_service",
-        "/workspaces/capella_ros_docker/build/capella_nav_and_carto_server",
-        "/workspaces/capella_ros_docker/install/local/lib/python3.10/dist-packages",
-        "/workspaces/capella_ros_docker/install/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
         "/opt/ros/humble/local/lib/python3.10/dist-packages",
-        "/opt/ros/humble/lib/python3.10/site-packages"
+        "${workspaceFolder}/../../install/lib/python3.10/site-packages",
+        "${workspaceFolder}/../../install/local/lib/python3.10/dist-packages"
     ],
     "python.autoComplete.extraPaths": [
-        "/workspaces/capella_ros_docker/build/video_control_speed",
-        "/workspaces/capella_ros_docker/build/nav2_simple_commander",
-        "/workspaces/capella_ros_docker/build/lidar_detect_person",
-        "/workspaces/capella_ros_docker/build/dabai_client",
-        "/workspaces/capella_ros_docker/build/crowd_statistics",
-        "/workspaces/capella_ros_docker/build/charge_manager",
-        "/workspaces/capella_ros_docker/build/capella_charge_service",
-        "/workspaces/capella_ros_docker/build/capella_nav_and_carto_server",
-        "/workspaces/capella_ros_docker/install/local/lib/python3.10/dist-packages",
-        "/workspaces/capella_ros_docker/install/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
         "/opt/ros/humble/local/lib/python3.10/dist-packages",
-        "/opt/ros/humble/lib/python3.10/site-packages"
-    ]
+        "${workspaceFolder}/../../install/lib/python3.10/site-packages",
+        "${workspaceFolder}/../../install/local/lib/python3.10/dist-packages"
+    ],
+    "cmake.configureOnOpen": false,
+     "terminal.integrated.env.linux": {
+        "ROS_DOMAIN_ID": "30",
+    },
+    "terminal.integrated.profiles.linux": {
+        "Auto Init": {
+            "path": "bash",
+            "icon": "terminal-bash",
+            "args": [
+                "-l",
+                "-c",
+                "source ${workspaceFolder}/../../install/setup.bash; export ROS_DOMAIN_ID=30; exec bash -i"
+            ]
+        }
+    },
+    "terminal.integrated.defaultProfile.linux": "Auto Init",
+    "ROS2.distro": "humble"
 }

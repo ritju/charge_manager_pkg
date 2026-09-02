@@ -7,6 +7,9 @@ string mac
 string behavior_tree
 uint8 restore
 uint8 type
+string marker
+string protocol
+geometry_msgs/Pose delta
 ---
 bool success
 ---

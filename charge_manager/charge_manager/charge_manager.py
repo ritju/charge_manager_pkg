@@ -20,6 +20,7 @@ from charge_manager_msgs.msg import BluetoothStatus
 from charge_manager_msgs.msg import BluetoothCommand
 from charge_manager_msgs.srv import StartBluetooth, StopBluetooth
 from capella_ros_service_interfaces.msg import ChargeState
+from capella_ros_service_interfaces.srv import ChargeStart, DockStart
 from geometry_msgs.msg import Twist
 
 class chargeManager(Node):
@@ -111,6 +112,12 @@ class chargeManager(Node):
         
         # /charger/stop_docking
         self.charger_stop_docking_service = self.create_service(Empty, '/charger/stop_docking', self.charger_stop_docking_service_callback, callback_group=callback_group_type)
+
+        # /charger/start2 service
+        self.charger_start2_service = self.create_service(ChargeStart, '/charger/start2', self.charger_start2_service_callback, callback_group=callback_group_type)
+
+        # /charger/start_docking2 service
+        self.charger_start_docking2_service = self.create_service(DockStart, '/charger/start_docking2', self.charger_start_docking2_service_callback, callback_group=callback_group_type)
 
         # /bluetooth/start
         # self.bluetooth_start_service = self.create_service(StartBluetooth, '/bluetooth/start', self.bluetooth_start_callback, callback_group=callback_group_type)
@@ -264,6 +271,63 @@ class chargeManager(Node):
         self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
         return response
     
+    def charger_start2_service_callback(self, request, response):
+        self.get_logger().info('received a request for /charger/start2 service')
+        # pre-check: bluetooth not connected
+        if self.charger_state.pid == '':
+            self.get_logger().info('/charger/start2: bluetooth not found (pid is empty)')
+            response.code = 30
+            response.message = 'bluetooth not found'
+            return response
+        # pre-check: bluetooth no data (not has_contact and not is_charging)
+        if not self.charger_state.has_contact and not self.charger_state.is_charging:
+            self.get_logger().info('/charger/start2: bluetooth no data (no contact, not charging)')
+            response.code = 32
+            response.message = 'bluetooth no data'
+            return response
+        # pre-check: already charging
+        if self.charger_state.is_charging:
+            self.get_logger().info('/charger/start2: already charging, return success')
+            response.code = 0
+            response.message = 'success'
+            return response
+        # publish CHARGER_START command
+        msg = BluetoothCommand()
+        msg.command = BluetoothCommand.CHARGER_START
+        self.command_publisher.publish(msg)
+        self.get_logger().info('/charger/start2: CHARGER_START command published')
+        response.code = 0
+        response.message = 'success'
+        return response
+
+    def charger_start_docking2_service_callback(self, request, response):
+        self.get_logger().info('received a request for /charger/start_docking2 service')
+        self.get_logger().info(f'/charger/start_docking2: mac={request.mac}, marker={request.marker}, protocol={request.protocol}')
+        # pre-check: charge action server available (non-blocking)
+        if not self.charge_action_client.wait_for_server(0):
+            self.get_logger().info('/charger/start_docking2: charge action server not available')
+            response.code = 10
+            response.message = 'charge action server not exist'
+            return response
+        self.get_logger().info("start charge action via /charger/start_docking2")
+        self.get_logger().info(f"write 1 to /map/core_restart.txt for /charger/start_docking2")
+        try:
+            with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                f.write('1\n')
+        except Exception as e:
+            self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for /charger/start_docking2.")
+        self.charger_state.is_docking = True
+        charge_msg = Charge.Goal()
+        charge_msg.mac = request.mac
+        charge_msg.marker = request.marker
+        charge_msg.protocol = request.protocol
+        charge_msg.delta = request.delta
+        self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
+        self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
+        response.code = 0
+        response.message = 'success'
+        return response
+
     def charger_stop_docking_service_callback(self, request, response):
         self.charger_state.is_docking = False
         self.get_logger().info('received a request for /charger/stop_docking service')

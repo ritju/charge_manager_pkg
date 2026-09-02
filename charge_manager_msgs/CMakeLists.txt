@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(capella_ros_service_interfaces REQUIRED)
+find_package(geometry_msgs REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
@@ -23,6 +24,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StopBluetooth.srv"
   "action/Charge.action"
   DEPENDENCIES capella_ros_service_interfaces
+  DEPENDENCIES geometry_msgs
   )
 
 if(BUILD_TESTING)
