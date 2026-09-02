@@ -35,7 +35,6 @@ class chargeManager(Node):
         self.charge_action_client_sendgoal_future = None
 
         callback_group_type = ReentrantCallbackGroup()
-        self.command_publisher = self.create_publisher(BluetoothCommand, 'bluetooth_command', 1, callback_group=callback_group_type)
 
         # init bluetooth params
         self.bluetooth_status = BluetoothStatus.DOWN
@@ -199,29 +198,30 @@ class chargeManager(Node):
         if msg.has_contact:
             self.charger_state.is_docking = False
     
+    def _call_charge_command(self, command):
+        """Helper to call /charge_command service."""
+        if not self.charge_command_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().info(f'_call_charge_command: /charge_command service not available')
+            return
+        cmd_req = ChargeCommand.Request()
+        cmd_req.command = command
+        self.charge_command_client.call_async(cmd_req)
+
     def add_water_ctr_sub_callback(self, msg):
         if msg.data == True:
             self.get_logger().info(f'received the topic /add_water_ctr with value {msg.data}')
-            msg = BluetoothCommand()
-            msg.command = BluetoothCommand.WATER_START
-            self.command_publisher.publish(msg)
+            self._call_charge_command(BluetoothCommand.WATER_START)
         else:
             self.get_logger().info(f'received the topic /add_water_ctr with value {msg.data}')
-            msg = BluetoothCommand()
-            msg.command = BluetoothCommand.WATER_STOP
-            self.command_publisher.publish(msg)
+            self._call_charge_command(BluetoothCommand.WATER_STOP)
 
     def manual_add_water_ctr_sub_callback(self, msg):
         if msg.data == True:
             self.get_logger().info(f'received the topic /manual_add_water_ctr with value {msg.data}')
-            msg = BluetoothCommand()
-            msg.command = BluetoothCommand.ENABLE_MANUAL_ADD_WATER
-            self.command_publisher.publish(msg)
+            self._call_charge_command(BluetoothCommand.ENABLE_MANUAL_ADD_WATER)
         else:
             self.get_logger().info(f'received the topic /manual_add_water_ctr with value {msg.data}')
-            msg = BluetoothCommand()
-            msg.command = BluetoothCommand.DISABLE_MANUAL_ADD_WATER
-            self.command_publisher.publish(msg)            
+            self._call_charge_command(BluetoothCommand.DISABLE_MANUAL_ADD_WATER)            
     
     def charger_id_sub_callback(self, msg):
         if msg.data != '':
@@ -229,30 +229,22 @@ class chargeManager(Node):
     
     def charger_start_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start service')
-        msg = BluetoothCommand()
-        msg.command = BluetoothCommand.CHARGER_START
-        self.command_publisher.publish(msg)
+        self._call_charge_command(BluetoothCommand.CHARGER_START)
         return response
 
     def charger_stop_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/stop service')
-        msg = BluetoothCommand()
-        msg.command = BluetoothCommand.CHARGER_STOP
-        self.command_publisher.publish(msg)
+        self._call_charge_command(BluetoothCommand.CHARGER_STOP)
         return response
 
     def water_start_service_callback(self, request, response):
         self.get_logger().info('received a request for /water/start service')
-        msg = BluetoothCommand()
-        msg.command = BluetoothCommand.WATER_START
-        self.command_publisher.publish(msg)
+        self._call_charge_command(BluetoothCommand.WATER_START)
         return response
 
     def water_stop_service_callback(self, request, response):
         self.get_logger().info('received a request for /water/stop service')
-        msg = BluetoothCommand()
-        msg.command = BluetoothCommand.WATER_STOP
-        self.command_publisher.publish(msg)
+        self._call_charge_command(BluetoothCommand.WATER_STOP)
         return response
 
     def charger_start_docking_service_callback(self, request, response):

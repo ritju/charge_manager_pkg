@@ -99,7 +99,7 @@ class BluetoothChargeServer(Node):
 
         self.charge_state_publisher = self.create_publisher(ChargeState2, '/charger/state2', charger_state_qos, callback_group=ReentrantCallbackGroup())
         self.publish_rate = self.create_rate(5)
-        self.start_stop_charge_server = self.create_subscription(BluetoothCommand, '/bluetooth_command', self.start_stop_charge_callback, 5, callback_group=ReentrantCallbackGroup())
+        # /charge_command service replaces the old /bluetooth_command topic subscription
         self.udp_data = None
 
         # 并发控制
@@ -254,273 +254,6 @@ class BluetoothChargeServer(Node):
 
             self.publish_rate.sleep()
 
-    def start_stop_charge_callback(self, msgs):
-        if self.charge_state.pid == '':
-            self.get_logger().info('未连接充电桩bluetooth,请先连接！')
-            return
-
-        # 开始充电
-        if msgs.command == BluetoothCommand.CHARGER_START:
-            time.sleep(0.5)
-            self.get_logger().info('收到开始充电命令')
-            if not self.charge_state.has_contact:
-                self.get_logger().info("还未与充电桩接触,请接触好在充电。")
-                return
-            if self.charge_state.is_charging:
-                self.get_logger().info("早已经在充电了。")
-                return
-            send_d = self.send_heartbeat_data.copy()
-            if self.use_bluetooth_protocol_new:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '03'   # 数据域长度
-                send_d[11] = '00'
-                send_d.append('01') # 开启充电
-                if self.charge_state.is_waterflooding:
-                    send_d.append('01')
-                else:                    
-                    send_d.append('00')
-                if self.charge_state.manual_enable_stu:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            else:                
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '02'   # 数据域长度
-                send_d[11] = '00'
-                send_d.append('02') # 开启充电
-                send_d.append('00')
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            self.send_data = bytes.fromhex(''.join(send_d))
-            t1 = time.time()
-            while True:
-                if self.charge_state.is_charging:
-                    self.get_logger().info('成功开始充电！')
-                    break
-                elif time.time() - t1 > 10:
-                    self.get_logger().info('开始充电失败！')
-                    break
-                else:
-                    time.sleep(1)
-        # 停止充电
-        elif msgs.command == BluetoothCommand.CHARGER_STOP:
-            self.get_logger().info('收到停止充电命令')
-            if not self.charge_state.is_charging:
-                self.get_logger().info('本来就没充电。')
-                return
-            send_d = self.send_heartbeat_data.copy()
-            if self.use_bluetooth_protocol_new:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '03' # 数据域长度
-                send_d[11] = '00'
-                send_d.append('00') # 关闭充电
-                if self.charge_state.is_waterflooding:
-                    send_d.append('01')
-                else:                    
-                    send_d.append('00')
-                if self.charge_state.manual_enable_stu:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            else:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '02'   # 数据域长度
-                send_d[11] = '00'
-                send_d.append('01') # 关闭充电
-                send_d.append('00')
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            self.send_data = bytes.fromhex(''.join(send_d))
-            t1 = time.time()
-            while True:
-                if not self.charge_state.is_charging:
-                    self.get_logger().info('成功关闭充电！')
-                    break
-                elif time.time() - t1 > 10:
-                    self.get_logger().info('关闭充电失败！')
-                    break
-                else:
-                    time.sleep(1)
-
-        # 开始加水
-        elif msgs.command == BluetoothCommand.WATER_START:
-            self.get_logger().info('收到开始加水命令')
-            if not self.charge_state.has_contact:
-                self.get_logger().info("还未与充电桩接触,请接触好在加水。")
-                return
-            if self.charge_state.is_waterflooding:
-                self.get_logger().info('已经在加水了。')
-                return
-            send_d = self.send_heartbeat_data.copy()
-            if self.use_bluetooth_protocol_new:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '03'    # 数据域长度
-                send_d[11] = '00'
-                if self.charge_state.is_charging:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')
-                send_d.append('01')  # 开启加水
-                if self.charge_state.manual_enable_stu:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            else:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '02'   # 数据域长度
-                send_d[11] = '00'
-                send_d.append('00')
-                send_d.append('01') # 开启加水
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            self.send_data = bytes.fromhex(''.join(send_d))
-            t1 = time.time()
-            while True:
-                if self.charge_state.is_waterflooding:
-                    self.get_logger().info('成功开始加水！')
-                    break
-                elif time.time() - t1 > 10:
-                    self.get_logger().info('开始加水失败！')
-                    break
-                else:
-                    time.sleep(1)
-        
-        # 停止加水
-        elif msgs.command == BluetoothCommand.WATER_STOP:
-            self.get_logger().info('收到停止加水命令')
-            if not self.charge_state.is_waterflooding:
-                self.get_logger().info('本来就没加水。')
-                return
-            send_d = self.send_heartbeat_data.copy()
-            if self.use_bluetooth_protocol_new:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '03'    # 数据域长度
-                send_d[11] = '00'
-                if self.charge_state.is_charging:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')
-                send_d.append('00')  # 关闭加水
-                if self.charge_state.manual_enable_stu:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            else:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '02'   # 数据域长度
-                send_d[11] = '00'
-                send_d.append('00')
-                send_d.append('02') # 关闭加水
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            self.send_data = bytes.fromhex(''.join(send_d))
-            t1 = time.time()
-            while True:
-                if not self.charge_state.is_waterflooding:
-                    self.get_logger().info('成功关闭加水！')
-                    break
-                elif time.time() - t1 > 10:
-                    self.get_logger().info('关闭加水失败！')
-                    break
-                else:
-                    time.sleep(1)
-
-        # 允许开启手动加水功能
-        if msgs.command == BluetoothCommand.ENABLE_MANUAL_ADD_WATER:
-            time.sleep(0.5)
-            self.get_logger().info('收到允许手动加水命令')
-            if not self.charge_state.has_contact:
-                self.get_logger().info("还未与充电桩接触,请接触好再允许手动加水")
-                return
-            if self.charge_state.manual_enable_stu:
-                self.get_logger().info("早已经允许手动加水了。")
-                return
-            send_d = self.send_heartbeat_data.copy()
-            if self.use_bluetooth_protocol_new:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '03'   # 数据域长度
-                send_d[11] = '00'
-                if self.charge_state.is_charging:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')
-                if self.charge_state.is_waterflooding:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')                    
-                send_d.append('01') # 允许手动加水功能
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            else:                
-                self.get_logger().info("旧的的充电桩不支持允许手动加水功能。")
-                return
-            self.send_data = bytes.fromhex(''.join(send_d))
-            t1 = time.time()
-            while True:
-                if self.charge_state.manual_enable_stu:
-                    self.get_logger().info('成功允许手动加水功能！')
-                    break
-                elif time.time() - t1 > 10:
-                    self.get_logger().info('允许手动加水功能失败！')
-                    break
-                else:
-                    time.sleep(1)
-
-        # 禁止开启手动加水功能
-        elif msgs.command == BluetoothCommand.DISABLE_MANUAL_ADD_WATER:
-            self.get_logger().info('收到禁止手动加水命令')
-            if not self.charge_state.manual_enable_stu:
-                self.get_logger().info('本来就禁止手动加水。')
-                return
-            send_d = self.send_heartbeat_data.copy()
-            if self.use_bluetooth_protocol_new:
-                send_d[8] = '80'
-                send_d[9] = '00'
-                send_d[10] = '03' # 数据域长度
-                send_d[11] = '00'
-                if self.charge_state.is_charging:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')
-                if self.charge_state.is_waterflooding:
-                    send_d.append('01')
-                else:
-                    send_d.append('00')     
-                send_d.append('00') # 禁止手动加水功能
-                send_d.append(self.crc8(send_d))
-                send_d.append('16')
-            else:
-                self.get_logger().info("旧的的充电桩不支持禁止手动加水功能。")
-                return
-            self.send_data = bytes.fromhex(''.join(send_d))
-            t1 = time.time()
-            while True:
-                if not self.charge_state.manual_enable_stu:
-                    self.get_logger().info('成功禁止手动加水功能！')
-                    break
-                elif time.time() - t1 > 10:
-                    self.get_logger().info('禁止手动加水功能失败！')
-                    break
-                else:
-                    time.sleep(1)
-
     def charge_command_callback(self, request, response):
         """Service callback for /charge_command - returns structured error codes."""
         try:
@@ -654,6 +387,130 @@ class BluetoothChargeServer(Node):
                         return response
                     else:
                         time.sleep(1)
+            elif request.command == BluetoothCommand.WATER_START:
+                if self.charge_state.pid == '':
+                    response.success = False
+                    response.code = 30
+                    response.message = 'bluetooth not found'
+                    return response
+                if not self.charge_state.has_contact:
+                    response.success = False
+                    response.code = 32
+                    response.message = 'bluetooth no data'
+                    return response
+                if self.charge_state.is_waterflooding:
+                    response.success = True
+                    response.code = 0
+                    response.message = 'success'
+                    return response
+                send_d = self.send_heartbeat_data.copy()
+                if self.use_bluetooth_protocol_new:
+                    send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
+                    send_d.append('01' if self.charge_state.is_charging else '00')
+                    send_d.append('01')
+                    send_d.append('01' if self.charge_state.manual_enable_stu else '00')
+                    send_d.append(self.crc8(send_d)); send_d.append('16')
+                else:
+                    send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '02'; send_d[11] = '00'
+                    send_d.append('00'); send_d.append('01')
+                    send_d.append(self.crc8(send_d)); send_d.append('16')
+                self.send_data = bytes.fromhex(''.join(send_d))
+                t1 = time.time()
+                while True:
+                    if self.charge_state.is_waterflooding:
+                        response.success = True; response.code = 0; response.message = 'success'
+                        return response
+                    elif time.time() - t1 > 10:
+                        response.success = False; response.code = 13; response.message = 'timeout response'
+                        return response
+                    else: time.sleep(1)
+
+            elif request.command == BluetoothCommand.WATER_STOP:
+                if self.charge_state.pid == '':
+                    response.success = False; response.code = 30; response.message = 'bluetooth not found'
+                    return response
+                if not self.charge_state.is_waterflooding:
+                    response.success = True; response.code = 0; response.message = 'success'
+                    return response
+                send_d = self.send_heartbeat_data.copy()
+                if self.use_bluetooth_protocol_new:
+                    send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
+                    send_d.append('01' if self.charge_state.is_charging else '00')
+                    send_d.append('00')
+                    send_d.append('01' if self.charge_state.manual_enable_stu else '00')
+                    send_d.append(self.crc8(send_d)); send_d.append('16')
+                else:
+                    send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '02'; send_d[11] = '00'
+                    send_d.append('00'); send_d.append('02')
+                    send_d.append(self.crc8(send_d)); send_d.append('16')
+                self.send_data = bytes.fromhex(''.join(send_d))
+                t1 = time.time()
+                while True:
+                    if not self.charge_state.is_waterflooding:
+                        response.success = True; response.code = 0; response.message = 'success'
+                        return response
+                    elif time.time() - t1 > 10:
+                        response.success = False; response.code = 13; response.message = 'timeout response'
+                        return response
+                    else: time.sleep(1)
+
+            elif request.command == BluetoothCommand.ENABLE_MANUAL_ADD_WATER:
+                if self.charge_state.pid == '':
+                    response.success = False; response.code = 30; response.message = 'bluetooth not found'
+                    return response
+                if not self.charge_state.has_contact:
+                    response.success = False; response.code = 32; response.message = 'bluetooth no data'
+                    return response
+                if self.charge_state.manual_enable_stu:
+                    response.success = True; response.code = 0; response.message = 'success'
+                    return response
+                if not self.use_bluetooth_protocol_new:
+                    response.success = False; response.code = 40; response.message = 'old protocol not supported'
+                    return response
+                send_d = self.send_heartbeat_data.copy()
+                send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
+                send_d.append('01' if self.charge_state.is_charging else '00')
+                send_d.append('01' if self.charge_state.is_waterflooding else '00')
+                send_d.append('01')
+                send_d.append(self.crc8(send_d)); send_d.append('16')
+                self.send_data = bytes.fromhex(''.join(send_d))
+                t1 = time.time()
+                while True:
+                    if self.charge_state.manual_enable_stu:
+                        response.success = True; response.code = 0; response.message = 'success'
+                        return response
+                    elif time.time() - t1 > 10:
+                        response.success = False; response.code = 13; response.message = 'timeout response'
+                        return response
+                    else: time.sleep(1)
+
+            elif request.command == BluetoothCommand.DISABLE_MANUAL_ADD_WATER:
+                if self.charge_state.pid == '':
+                    response.success = False; response.code = 30; response.message = 'bluetooth not found'
+                    return response
+                if not self.charge_state.manual_enable_stu:
+                    response.success = True; response.code = 0; response.message = 'success'
+                    return response
+                if not self.use_bluetooth_protocol_new:
+                    response.success = False; response.code = 40; response.message = 'old protocol not supported'
+                    return response
+                send_d = self.send_heartbeat_data.copy()
+                send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
+                send_d.append('01' if self.charge_state.is_charging else '00')
+                send_d.append('01' if self.charge_state.is_waterflooding else '00')
+                send_d.append('00')
+                send_d.append(self.crc8(send_d)); send_d.append('16')
+                self.send_data = bytes.fromhex(''.join(send_d))
+                t1 = time.time()
+                while True:
+                    if not self.charge_state.manual_enable_stu:
+                        response.success = True; response.code = 0; response.message = 'success'
+                        return response
+                    elif time.time() - t1 > 10:
+                        response.success = False; response.code = 13; response.message = 'timeout response'
+                        return response
+                    else: time.sleep(1)
+
             else:
                 self.get_logger().info(f'/charge_command: unsupported command {request.command}')
                 response.success = False
