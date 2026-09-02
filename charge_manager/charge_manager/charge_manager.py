@@ -21,6 +21,7 @@ from charge_manager_msgs.msg import BluetoothCommand
 from charge_manager_msgs.srv import StartBluetooth, StopBluetooth
 from capella_ros_service_interfaces.msg import ChargeState
 from capella_ros_service_interfaces.srv import ChargeStart, DockStart
+from charge_manager_msgs.srv import ChargeCommand
 from geometry_msgs.msg import Twist
 
 class chargeManager(Node):
@@ -126,6 +127,9 @@ class chargeManager(Node):
         # self.bluetooth_stop_service = self.create_service(StopBluetooth, '/bluetooth/stop', self.bluetooth_stop_callback, callback_group=callback_group_type)
 
         self.charge_action_client = ActionClient(self, Charge, 'charge', callback_group=callback_group_type)
+
+        # /charge_command service client (async, with error codes)
+        self.charge_command_client = self.create_client(ChargeCommand, '/charge_command', callback_group=callback_group_type)
 
         # restore charge
         self.get_logger().info('restore charging or not ...')
@@ -273,60 +277,73 @@ class chargeManager(Node):
     
     def charger_start2_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start2 service')
-        # pre-check: bluetooth not connected
-        if self.charger_state.pid == '':
-            self.get_logger().info('/charger/start2: bluetooth not found (pid is empty)')
-            response.code = 30
-            response.message = 'bluetooth not found'
+        # Call /charge_command service asynchronously
+        if not self.charge_command_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().info('/charger/start2: /charge_command service not available')
+            response.code = 13
+            response.message = 'timeout response'
             return response
-        # pre-check: bluetooth no data (not has_contact and not is_charging)
-        if not self.charger_state.has_contact and not self.charger_state.is_charging:
-            self.get_logger().info('/charger/start2: bluetooth no data (no contact, not charging)')
-            response.code = 32
-            response.message = 'bluetooth no data'
-            return response
-        # pre-check: already charging
-        if self.charger_state.is_charging:
-            self.get_logger().info('/charger/start2: already charging, return success')
-            response.code = 0
-            response.message = 'success'
-            return response
-        # publish CHARGER_START command
-        msg = BluetoothCommand()
-        msg.command = BluetoothCommand.CHARGER_START
-        self.command_publisher.publish(msg)
-        self.get_logger().info('/charger/start2: CHARGER_START command published')
-        response.code = 0
-        response.message = 'success'
+        cmd_req = ChargeCommand.Request()
+        cmd_req.command = BluetoothCommand.CHARGER_START
+        try:
+            future = self.charge_command_client.call_async(cmd_req)
+            rclpy.spin_until_future_complete(self, future, timeout_sec=15.0)
+            cmd_resp = future.result()
+            if cmd_resp is not None:
+                response.code = cmd_resp.code
+                response.message = cmd_resp.message
+                self.get_logger().info(f'/charger/start2: response code={cmd_resp.code}, message={cmd_resp.message}')
+            else:
+                self.get_logger().info('/charger/start2: /charge_command returned None')
+                response.code = 13
+                response.message = 'timeout response'
+        except Exception as e:
+            self.get_logger().info(f'/charger/start2: exception calling /charge_command: {e}')
+            response.code = 40
+            response.message = f'unknown error: {e}'
         return response
 
     def charger_start_docking2_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start_docking2 service')
         self.get_logger().info(f'/charger/start_docking2: mac={request.mac}, marker={request.marker}, protocol={request.protocol}')
-        # pre-check: charge action server available (non-blocking)
-        if not self.charge_action_client.wait_for_server(0):
-            self.get_logger().info('/charger/start_docking2: charge action server not available')
-            response.code = 10
-            response.message = 'charge action server not exist'
-            return response
-        self.get_logger().info("start charge action via /charger/start_docking2")
-        self.get_logger().info(f"write 1 to /map/core_restart.txt for /charger/start_docking2")
         try:
-            with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
-                f.write('1\n')
+            # pre-check: cancelled - already docking
+            if self.charger_state.is_docking:
+                self.get_logger().info('/charger/start_docking2: cancelled - dock already in progress')
+                response.code = 5
+                response.message = 'cancelled'
+                return response
+            # pre-check: charge action server available (with timeout)
+            if not self.charge_action_client.wait_for_server(5):
+                self.get_logger().info('/charger/start_docking2: charge action server not available')
+                response.code = 10
+                response.message = 'charge action server not exist'
+                return response
+            # pre-check: camera not ready (placeholder - user will implement camera check later)
+            # TODO: Add camera data availability check when camera status is exposed
+            self.get_logger().info("start charge action via /charger/start_docking2")
+            self.get_logger().info(f"write 1 to /map/core_restart.txt for /charger/start_docking2")
+            try:
+                with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                    f.write('1\n')
+            except Exception as e:
+                self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for /charger/start_docking2.")
+            self.charger_state.is_docking = True
+            charge_msg = Charge.Goal()
+            charge_msg.mac = request.mac
+            charge_msg.marker = request.marker
+            charge_msg.protocol = request.protocol
+            charge_msg.delta = request.delta
+            self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
+            self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
+            response.code = 0
+            response.message = 'success'
+            return response
         except Exception as e:
-            self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for /charger/start_docking2.")
-        self.charger_state.is_docking = True
-        charge_msg = Charge.Goal()
-        charge_msg.mac = request.mac
-        charge_msg.marker = request.marker
-        charge_msg.protocol = request.protocol
-        charge_msg.delta = request.delta
-        self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
-        self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
-        response.code = 0
-        response.message = 'success'
-        return response
+            self.get_logger().info(f'/charger/start_docking2: exception {e}')
+            response.code = 40
+            response.message = f'unknown error: {e}'
+            return response
 
     def charger_stop_docking_service_callback(self, request, response):
         self.charger_state.is_docking = False
@@ -363,66 +380,6 @@ class chargeManager(Node):
         self.charger_state.is_docking = False
         self.get_logger().info('=== Charge action ===     result => success: {}'.format(result.success))
     
-    # def bluetooth_start_callback(self, request, response):
-    #     time_start = time.time()
-    #     self.get_logger().info('received a request for /bluetooth/start service request.')
-        
-    #     try:
-    #         if self.bluetooth_proc != None:
-    #             self.get_logger().info('bluetooth server is online, do noting')
-    #         else:
-    #             self.bluetooth_proc = subprocess.Popen(
-    #                 ["ros2", "run", "charge_manager", "charge_bluetooth_old"])
-            
-    #         time.sleep(10)        # waiting for bluetooth server node setup completed.
-    #         self.bluetooth_status = BluetoothStatus.UP
-    #         response.success = True
-    #         response.infos = "start bluetooth node success"
-    #         self.get_logger().info(f'{response.infos}')
-    #     except Exception as e:
-    #         response.success = False
-    #         response.infos = str(e)
-    #         self.get_logger().info(f'{response.infos}')
-
-    #     time_end = time.time()
-    #     response.cost_time = round(time_end - time_start, 1)
-    #     return response
-
-    # def bluetooth_stop_callback(self, request, response):
-    #     time_start = time.time()
-    #     self.get_logger().info('received a request for /bluetooth/stop service request.')
-    #     try:
-    #         if self.bluetooth_proc != None:
-    #             self.terminate(self.bluetooth_proc)
-    #             self.bluetooth_proc = None
-    #         else:
-    #             self.get_logger().info('bluetooth server is not online, do nothing')
-    #         response.success = True
-    #         response.infos = "stop bluetooth node success."
-    #         self.get_logger().info(f'{response.infos}')
-    #     except Exception as e:
-    #         response.success = False
-    #         response.infos = str(e)
-    #         self.get_logger().info(f'when stop bluetooth, catch exception: {response.infos}')
-    #         self.get_logger().info(f'write 1 to /map/core_restart.txt for stopping bluetooth node failed.')
-    #         try:
-    #             with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
-    #                 f.write('1\n')
-    #                 f.write(self.mac)
-    #         except Exception as e:
-    #             self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing stop bluetooth_node failed.")
-        
-    #     # don't kill child process success
-    #     # self.bluetooth_proc.terminate()
-    #     # self.bluetooth_proc.wait()
-    #     # os.killpg(self.bluetooth_proc.pid, SIGINT)
-        
-    #     self.bluetooth_status = BluetoothStatus.DOWN
-    #     time_end = time.time()
-    #     response.cost_time = round(time_end - time_start, 1)
-    #     return response
-    
-
     def terminate(self, proc: subprocess.Popen):
         parent_pid = proc.pid 
         parent = psutil.Process(parent_pid)

@@ -4,7 +4,7 @@ import time
 import os
 import threading
 import crcmod.predefined
-from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth
+from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth, ChargeCommand
 from charge_manager_msgs.msg import ChargeState2
 from charge_manager_msgs.msg import BluetoothCommand
 from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolicy
@@ -76,6 +76,7 @@ class BluetoothChargeServer(Node):
 
         self.bluetooth_concact_server = self.create_service(ConnectBluetooth, '/connect_bluetooth', self.connect_bluetooth, callback_group=ReentrantCallbackGroup())
         self.bluetooth_disconnect_server = self.create_service(DisconnectBluetooth, '/disconnect_bluetooth', self.disconnect_bluetooth_callback, callback_group=MutuallyExclusiveCallbackGroup())
+        self.charge_command_server = self.create_service(ChargeCommand, '/charge_command', self.charge_command_callback, callback_group=ReentrantCallbackGroup())
         
         charger_state_qos = QoSProfile(depth=1)
         charger_state_qos.reliability = ReliabilityPolicy.BEST_EFFORT
@@ -519,6 +520,153 @@ class BluetoothChargeServer(Node):
                     break
                 else:
                     time.sleep(1)
+
+    def charge_command_callback(self, request, response):
+        """Service callback for /charge_command - returns structured error codes."""
+        try:
+            if request.command == BluetoothCommand.CHARGER_START:
+                # Pre-check: bluetooth not connected
+                if self.charge_state.pid == '':
+                    self.get_logger().info('/charge_command CHARGER_START: bluetooth not found (pid is empty)')
+                    response.success = False
+                    response.code = 30
+                    response.message = 'bluetooth not found'
+                    return response
+                # Pre-check: already charging
+                if self.charge_state.is_charging:
+                    self.get_logger().info('/charge_command CHARGER_START: already charging')
+                    response.success = True
+                    response.code = 0
+                    response.message = 'success'
+                    return response
+                # Pre-check: no contact and not charging
+                if not self.charge_state.has_contact:
+                    self.get_logger().info('/charge_command CHARGER_START: bluetooth no data (no contact)')
+                    response.success = False
+                    response.code = 32
+                    response.message = 'bluetooth no data'
+                    return response
+                # Send BLE charge start command (reuse existing logic)
+                time.sleep(0.5)
+                self.get_logger().info('/charge_command CHARGER_START: sending BLE command')
+                send_d = self.send_heartbeat_data.copy()
+                if self.use_bluetooth_protocol_new:
+                    send_d[8] = '80'
+                    send_d[9] = '00'
+                    send_d[10] = '03'
+                    send_d[11] = '00'
+                    send_d.append('01')  # 开启充电
+                    if self.charge_state.is_waterflooding:
+                        send_d.append('01')
+                    else:
+                        send_d.append('00')
+                    if self.charge_state.manual_enable_stu:
+                        send_d.append('01')
+                    else:
+                        send_d.append('00')
+                    send_d.append(self.crc8(send_d))
+                    send_d.append('16')
+                else:
+                    send_d[8] = '80'
+                    send_d[9] = '00'
+                    send_d[10] = '02'
+                    send_d[11] = '00'
+                    send_d.append('02')  # 开启充电
+                    send_d.append('00')
+                    send_d.append(self.crc8(send_d))
+                    send_d.append('16')
+                self.send_data = bytes.fromhex(''.join(send_d))
+                # Wait for confirmation with timeout
+                t1 = time.time()
+                while True:
+                    if self.charge_state.is_charging:
+                        self.get_logger().info('/charge_command CHARGER_START: success')
+                        response.success = True
+                        response.code = 0
+                        response.message = 'success'
+                        return response
+                    elif time.time() - t1 > 10:
+                        self.get_logger().info('/charge_command CHARGER_START: timeout response')
+                        response.success = False
+                        response.code = 13
+                        response.message = 'timeout response'
+                        return response
+                    else:
+                        time.sleep(1)
+
+            elif request.command == BluetoothCommand.CHARGER_STOP:
+                # Pre-check: bluetooth not connected
+                if self.charge_state.pid == '':
+                    self.get_logger().info('/charge_command CHARGER_STOP: bluetooth not found')
+                    response.success = False
+                    response.code = 30
+                    response.message = 'bluetooth not found'
+                    return response
+                # Pre-check: not charging
+                if not self.charge_state.is_charging:
+                    self.get_logger().info('/charge_command CHARGER_STOP: not charging, already stopped')
+                    response.success = True
+                    response.code = 0
+                    response.message = 'success'
+                    return response
+                # Send BLE charge stop command
+                self.get_logger().info('/charge_command CHARGER_STOP: sending BLE command')
+                send_d = self.send_heartbeat_data.copy()
+                if self.use_bluetooth_protocol_new:
+                    send_d[8] = '80'
+                    send_d[9] = '00'
+                    send_d[10] = '03'
+                    send_d[11] = '00'
+                    send_d.append('00')  # 关闭充电
+                    if self.charge_state.is_waterflooding:
+                        send_d.append('01')
+                    else:
+                        send_d.append('00')
+                    if self.charge_state.manual_enable_stu:
+                        send_d.append('01')
+                    else:
+                        send_d.append('00')
+                    send_d.append(self.crc8(send_d))
+                    send_d.append('16')
+                else:
+                    send_d[8] = '80'
+                    send_d[9] = '00'
+                    send_d[10] = '02'
+                    send_d[11] = '00'
+                    send_d.append('01')  # 关闭充电
+                    send_d.append('00')
+                    send_d.append(self.crc8(send_d))
+                    send_d.append('16')
+                self.send_data = bytes.fromhex(''.join(send_d))
+                t1 = time.time()
+                while True:
+                    if not self.charge_state.is_charging:
+                        self.get_logger().info('/charge_command CHARGER_STOP: success')
+                        response.success = True
+                        response.code = 0
+                        response.message = 'success'
+                        return response
+                    elif time.time() - t1 > 10:
+                        self.get_logger().info('/charge_command CHARGER_STOP: timeout response')
+                        response.success = False
+                        response.code = 13
+                        response.message = 'timeout response'
+                        return response
+                    else:
+                        time.sleep(1)
+            else:
+                self.get_logger().info(f'/charge_command: unsupported command {request.command}')
+                response.success = False
+                response.code = 40
+                response.message = f'unsupported command: {request.command}'
+                return response
+        except Exception as e:
+            self.get_logger().info(f'/charge_command: exception {e}')
+            response.success = False
+            response.code = 40
+            response.message = f'unknown error: {e}'
+            return response
+
     def wait_and_read(self, file_path, max_attempts=10, interval=1):
         attempts = 0
         while attempts < max_attempts:

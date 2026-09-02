@@ -22,6 +22,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/DisconnectBluetooth.srv"
   "srv/StartBluetooth.srv"
   "srv/StopBluetooth.srv"
+  "srv/ChargeCommand.srv"
   "action/Charge.action"
   DEPENDENCIES capella_ros_service_interfaces
   DEPENDENCIES geometry_msgs
