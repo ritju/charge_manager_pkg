@@ -1,10 +1,11 @@
 import rclpy
 from rclpy.node import Node
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolicy
 from rclpy.task import Future
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.exceptions import TimeoutException
 import psutil
 import subprocess
 from signal import SIGINT, SIGTERM
@@ -24,6 +25,15 @@ from capella_ros_service_interfaces.srv import ChargeStart, DockStart
 from charge_manager_msgs.srv import ChargeCommand
 from geometry_msgs.msg import Twist
 
+# Charge action / dock 错误码 → 消息映射
+CHARGE_ERROR_MESSAGES = {
+    0: 'success',
+    5: 'cancelled',
+    10: 'not exist',
+    13: 'timeout response',
+    40: 'unknown',
+}
+
 class chargeManager(Node):
     
     def __init__(self):
@@ -35,6 +45,7 @@ class chargeManager(Node):
         self.charge_action_client_sendgoal_future = None
 
         callback_group_type = ReentrantCallbackGroup()
+        single_cb_group = MutuallyExclusiveCallbackGroup()
 
         # init bluetooth params
         self.bluetooth_status = BluetoothStatus.DOWN
@@ -117,13 +128,7 @@ class chargeManager(Node):
         self.charger_start2_service = self.create_service(ChargeStart, '/charger/start2', self.charger_start2_service_callback, callback_group=callback_group_type)
 
         # /charger/start_docking2 service
-        self.charger_start_docking2_service = self.create_service(DockStart, '/charger/start_docking2', self.charger_start_docking2_service_callback, callback_group=callback_group_type)
-
-        # /bluetooth/start
-        # self.bluetooth_start_service = self.create_service(StartBluetooth, '/bluetooth/start', self.bluetooth_start_callback, callback_group=callback_group_type)
-
-        # /bluetooth/stop
-        # self.bluetooth_stop_service = self.create_service(StopBluetooth, '/bluetooth/stop', self.bluetooth_stop_callback, callback_group=callback_group_type)
+        self.charger_start_docking2_service = self.create_service(DockStart, '/charger/start_docking2', self.charger_start_docking2_service_callback, callback_group=single_cb_group)
 
         self.charge_action_client = ActionClient(self, Charge, 'charge', callback_group=callback_group_type)
 
@@ -273,8 +278,9 @@ class chargeManager(Node):
         if not self.charge_command_client.wait_for_service(timeout_sec=5.0):
             self.get_logger().info('/charger/start2: /charge_command service not available')
             response.code = 13
-            response.message = 'timeout response'
+            response.message = '/charge_command not exist'
             return response
+        
         cmd_req = ChargeCommand.Request()
         cmd_req.command = BluetoothCommand.CHARGER_START
         try:
@@ -302,8 +308,8 @@ class chargeManager(Node):
             # pre-check: cancelled - already docking
             if self.charger_state.is_docking:
                 self.get_logger().info('/charger/start_docking2: cancelled - dock already in progress')
-                response.code = 5
-                response.message = 'cancelled'
+                response.code = 1
+                response.message = 'already running'
                 return response
             # pre-check: charge action server available (with timeout)
             if not self.charge_action_client.wait_for_server(5):
@@ -327,10 +333,33 @@ class chargeManager(Node):
             charge_msg.protocol = request.protocol
             charge_msg.delta = request.delta
             self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
-            self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
-            response.code = 0
-            response.message = 'success'
+            
+            #self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
+            rclpy.spin_until_future_complete(self, self.charge_action_client_sendgoal_future, timeout_sec=10.0)
+            goal_handle = self.charge_action_client_sendgoal_future.result()
+            if not goal_handle.accepted:
+                self.get_logger().info('=== charge action ===     goal rejected !')
+                response.code = 10
+                response.message = 'action /charge failed'
+            else:
+                self.get_logger().info('=== charge action ===     goal accepted.')
+                self.charge_get_future_result = goal_handle.get_result_async()
+                rclpy.spin_until_future_complete(self, self.charge_get_future_result, timeout_sec=480.0)
+
+                dock_result = self.charge_get_future_result.result().result
+                self.charger_state.is_docking = False
+                self.get_logger().info('=== Charge action ===     result => success: {}, code: {}'.format(dock_result.success, dock_result.code))
+                response.code = dock_result.code
+                response.message = CHARGE_ERROR_MESSAGES.get(dock_result.code, 'unknown')
+
+            
             return response
+        except TimeoutException as e:
+            self.get_logger().info(f'/charger/start_docking2: timeout {e}')
+            response.code = 13
+            response.message = 'timeout response'
+            return response
+        
         except Exception as e:
             self.get_logger().info(f'/charger/start_docking2: exception {e}')
             response.code = 40

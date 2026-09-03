@@ -257,6 +257,14 @@ class BluetoothChargeServer(Node):
     def charge_command_callback(self, request, response):
         """Service callback for /charge_command - returns structured error codes."""
         try:
+            self.get_logger().info('got /charge_command %d', request.command)
+            if not self._connect_lock.acquire(blocking=False):
+                response.success = False
+                response.code = 2
+                response.message = 'blocked'
+                self.get_logger().info("Recving charge_command, but another operation is in progress")
+                return response
+            self._connect_lock.release()
             if request.command == BluetoothCommand.CHARGER_START:
                 # Pre-check: bluetooth not connected
                 if self.charge_state.pid == '':

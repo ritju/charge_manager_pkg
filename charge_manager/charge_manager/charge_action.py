@@ -258,6 +258,10 @@ class ChargeAction(Node):
         # add process when dock goal is rejected
         self.dock_goal_rejected = False
 
+        # charge action result error code tracking
+        self.charge_cancelled = False
+        self.dock_failed = False
+
         # 滑动窗口相关
         self.raw_vel_window = collections.deque()   # 存储 (timestamp, exceed_bool)
         self.raw_vel_lock = threading.Lock()
@@ -386,6 +390,9 @@ class ChargeAction(Node):
             self.get_logger().info('-------- call /dock action --------')
             dock_msg = Dock.Goal()
             dock_msg.mac = self.mac
+            dock_msg.marker = self.request_marker
+            dock_msg.protocol = self.request_protocol
+            dock_msg.delta = self.request_delta
             while not self.dock_client_.wait_for_server(2):
                 self.get_logger().info('Dock action server not available.', throttle_duration_sec = 2)
             self.dock_client_sendgoal_future = self.dock_client_.send_goal_async(dock_msg, self.dock_feedback_callback)
@@ -530,6 +537,7 @@ class ChargeAction(Node):
                 self.get_logger().info("return Charge action for reason: dock action is rejected.")
                 result = Charge.Result()
                 result.success = False
+                result.code = 40
                 self.goal_handle.abort()
                 try:
                     self.get_logger().info(f'存储充电状态 0 和 mac: {self.mac} 到/map/charge_restore.txt.')
@@ -572,7 +580,8 @@ class ChargeAction(Node):
                     except Exception as e:
                         self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/core_restart.txt for processing stop /charge action.")
                     result = Charge.Result()
-                    result.success = True
+                    result.code = 5 if self.charge_cancelled else (40 if self.dock_failed else 0)
+                    result.success = not (self.dock_failed or self.charge_cancelled)
                     self.goal_handle.succeed()
                     try:
                         self.get_logger().info(f'存储充电状态 0 和 mac: {self.mac} 到/map/charge_restore.txt.')
@@ -632,6 +641,7 @@ class ChargeAction(Node):
     # charge_action cancel callback
     def charge_action_cancel_callback(self, goal_handle):
         self.get_logger().info("Received request to cancel charge action servo goal")
+        self.charge_cancelled = True
         self.dock_completed = True
         self.stop_loop = True
         if self.dock_executing:
@@ -695,6 +705,7 @@ class ChargeAction(Node):
         self.get_logger().info('Dock result => is_docked: {}'.format(result.is_docked))
         if not result.is_docked:
             self.get_logger().info('Dock action failed, Charge Action aborted')
+            self.dock_failed = True
             self.stop_loop = True
         self.dock_executing = False
         self.dock_completed = True

@@ -12,5 +12,6 @@ string protocol
 geometry_msgs/Pose delta
 ---
 bool success
+uint16 code
 ---
 string state
