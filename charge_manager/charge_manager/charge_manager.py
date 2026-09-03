@@ -5,7 +5,6 @@ from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolicy
 from rclpy.task import Future
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.exceptions import TimeoutException
 import psutil
 import subprocess
 from signal import SIGINT, SIGTERM
@@ -333,35 +332,42 @@ class chargeManager(Node):
             charge_msg.protocol = request.protocol
             charge_msg.delta = request.delta
             self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
-            
+
             #self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
             rclpy.spin_until_future_complete(self, self.charge_action_client_sendgoal_future, timeout_sec=10.0)
+            if not self.charge_action_client_sendgoal_future.done():
+                self.get_logger().info('/charger/start_docking2: charge action goal timeout')
+                self.charger_state.is_docking = False
+                response.code = 13
+                response.message = 'timeout response'
+                return response
             goal_handle = self.charge_action_client_sendgoal_future.result()
             if not goal_handle.accepted:
                 self.get_logger().info('=== charge action ===     goal rejected !')
+                self.charger_state.is_docking = False
                 response.code = 10
                 response.message = 'action /charge failed'
-            else:
-                self.get_logger().info('=== charge action ===     goal accepted.')
-                self.charge_get_future_result = goal_handle.get_result_async()
-                rclpy.spin_until_future_complete(self, self.charge_get_future_result, timeout_sec=480.0)
-
-                dock_result = self.charge_get_future_result.result().result
+                return response
+            self.get_logger().info('=== charge action ===     goal accepted.')
+            self.charge_get_future_result = goal_handle.get_result_async()
+            rclpy.spin_until_future_complete(self, self.charge_get_future_result, timeout_sec=480.0)
+            if not self.charge_get_future_result.done():
+                self.get_logger().info('/charger/start_docking2: charge action result timeout')
                 self.charger_state.is_docking = False
-                self.get_logger().info('=== Charge action ===     result => success: {}, code: {}'.format(dock_result.success, dock_result.code))
-                response.code = dock_result.code
-                response.message = CHARGE_ERROR_MESSAGES.get(dock_result.code, 'unknown')
+                response.code = 13
+                response.message = 'timeout response'
+                return response
 
-            
+            dock_result = self.charge_get_future_result.result().result
+            self.charger_state.is_docking = False
+            self.get_logger().info('=== Charge action ===     result => success: {}, code: {}'.format(dock_result.success, dock_result.code))
+            response.code = dock_result.code
+            response.message = CHARGE_ERROR_MESSAGES.get(dock_result.code, 'unknown')
+
             return response
-        except TimeoutException as e:
-            self.get_logger().info(f'/charger/start_docking2: timeout {e}')
-            response.code = 13
-            response.message = 'timeout response'
-            return response
-        
         except Exception as e:
             self.get_logger().info(f'/charger/start_docking2: exception {e}')
+            self.charger_state.is_docking = False
             response.code = 40
             response.message = f'unknown error: {e}'
             return response
