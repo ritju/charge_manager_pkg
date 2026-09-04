@@ -107,6 +107,8 @@ class BluetoothChargeServer(Node):
         self._ble_task = None
         self._client = None
         self._client_lock = threading.Lock()
+        self._data_lock = threading.Lock()
+        self._state_lock = threading.Lock()
         self._shutdown_event = threading.Event()
 
         # 单一事件循环
@@ -116,8 +118,6 @@ class BluetoothChargeServer(Node):
 
         self.charge_state_publish_thread = threading.Thread(target=self.charge_state_pub, daemon=True)
         self.charge_state_publish_thread.start()
-
-        self.bluetooth_adapter = "hci0"
 
         self.get_logger().info("Bluetooth charge Server starting")
 
@@ -254,34 +254,50 @@ class BluetoothChargeServer(Node):
 
             self.publish_rate.sleep()
 
+    def _wait_and_check(self, send_d, checker, response, cmd: str):
+        send_d.append(self.crc8(send_d)); 
+        send_d.append('16')
+
+        with self._data_lock:
+            self.send_data = bytes.fromhex(''.join(send_d))
+        t1 = time.time()
+        while True:
+            with self._state_lock:
+                state_info = self.charge_state
+            if checker(state_info):
+                self.get_logger().info("Wait for %s success", cmd);
+                response.success = True; response.code = 0; response.message = 'success'
+                return response
+            elif time.time() - t1 > 10:
+                self.get_logger().info("Wait for %s timeout", cmd);
+                response.success = False; response.code = 13; response.message = 'timeout response'
+                return response
+            else: time.sleep(1)
+
     def charge_command_callback(self, request, response):
         """Service callback for /charge_command - returns structured error codes."""
         try:
             self.get_logger().info('got /charge_command %d', request.command)
-            if not self._connect_lock.acquire(blocking=False):
-                response.success = False
-                response.code = 2
-                response.message = 'blocked'
-                self.get_logger().info("Recving charge_command, but another operation is in progress")
-                return response
-            self._connect_lock.release()
+            state_info = None
+            with self._state_lock:
+                state_info = self.charge_state
             if request.command == BluetoothCommand.CHARGER_START:
                 # Pre-check: bluetooth not connected
-                if self.charge_state.pid == '':
+                if state_info.pid == '':
                     self.get_logger().info('/charge_command CHARGER_START: bluetooth not found (pid is empty)')
                     response.success = False
                     response.code = 30
                     response.message = 'bluetooth not found'
                     return response
                 # Pre-check: already charging
-                if self.charge_state.is_charging:
+                if state_info.is_charging:
                     self.get_logger().info('/charge_command CHARGER_START: already charging')
                     response.success = True
                     response.code = 0
                     response.message = 'success'
                     return response
                 # Pre-check: no contact and not charging
-                if not self.charge_state.has_contact:
+                if not state_info.has_contact:
                     self.get_logger().info('/charge_command CHARGER_START: bluetooth no data (no contact)')
                     response.success = False
                     response.code = 32
@@ -297,16 +313,14 @@ class BluetoothChargeServer(Node):
                     send_d[10] = '03'
                     send_d[11] = '00'
                     send_d.append('01')  # 开启充电
-                    if self.charge_state.is_waterflooding:
+                    if state_info.is_waterflooding:
                         send_d.append('01')
                     else:
                         send_d.append('00')
-                    if self.charge_state.manual_enable_stu:
+                    if state_info.manual_enable_stu:
                         send_d.append('01')
                     else:
                         send_d.append('00')
-                    send_d.append(self.crc8(send_d))
-                    send_d.append('16')
                 else:
                     send_d[8] = '80'
                     send_d[9] = '00'
@@ -314,37 +328,21 @@ class BluetoothChargeServer(Node):
                     send_d[11] = '00'
                     send_d.append('02')  # 开启充电
                     send_d.append('00')
-                    send_d.append(self.crc8(send_d))
-                    send_d.append('16')
-                self.send_data = bytes.fromhex(''.join(send_d))
+
                 # Wait for confirmation with timeout
-                t1 = time.time()
-                while True:
-                    if self.charge_state.is_charging:
-                        self.get_logger().info('/charge_command CHARGER_START: success')
-                        response.success = True
-                        response.code = 0
-                        response.message = 'success'
-                        return response
-                    elif time.time() - t1 > 10:
-                        self.get_logger().info('/charge_command CHARGER_START: timeout response')
-                        response.success = False
-                        response.code = 13
-                        response.message = 'timeout response'
-                        return response
-                    else:
-                        time.sleep(1)
+                self._wait_and_check(send_d, lambda cur_state: cur_state.is_charging
+                                     , response, "CHARGER_START")
 
             elif request.command == BluetoothCommand.CHARGER_STOP:
                 # Pre-check: bluetooth not connected
-                if self.charge_state.pid == '':
+                if state_info.pid == '':
                     self.get_logger().info('/charge_command CHARGER_STOP: bluetooth not found')
                     response.success = False
                     response.code = 30
                     response.message = 'bluetooth not found'
                     return response
                 # Pre-check: not charging
-                if not self.charge_state.is_charging:
+                if not state_info.is_charging:
                     self.get_logger().info('/charge_command CHARGER_STOP: not charging, already stopped')
                     response.success = True
                     response.code = 0
@@ -359,16 +357,14 @@ class BluetoothChargeServer(Node):
                     send_d[10] = '03'
                     send_d[11] = '00'
                     send_d.append('00')  # 关闭充电
-                    if self.charge_state.is_waterflooding:
+                    if state_info.is_waterflooding:
                         send_d.append('01')
                     else:
                         send_d.append('00')
-                    if self.charge_state.manual_enable_stu:
+                    if state_info.manual_enable_stu:
                         send_d.append('01')
                     else:
                         send_d.append('00')
-                    send_d.append(self.crc8(send_d))
-                    send_d.append('16')
                 else:
                     send_d[8] = '80'
                     send_d[9] = '00'
@@ -376,37 +372,22 @@ class BluetoothChargeServer(Node):
                     send_d[11] = '00'
                     send_d.append('01')  # 关闭充电
                     send_d.append('00')
-                    send_d.append(self.crc8(send_d))
-                    send_d.append('16')
-                self.send_data = bytes.fromhex(''.join(send_d))
-                t1 = time.time()
-                while True:
-                    if not self.charge_state.is_charging:
-                        self.get_logger().info('/charge_command CHARGER_STOP: success')
-                        response.success = True
-                        response.code = 0
-                        response.message = 'success'
-                        return response
-                    elif time.time() - t1 > 10:
-                        self.get_logger().info('/charge_command CHARGER_STOP: timeout response')
-                        response.success = False
-                        response.code = 13
-                        response.message = 'timeout response'
-                        return response
-                    else:
-                        time.sleep(1)
+
+                self._wait_and_check(send_d, lambda cur_state: not cur_state.is_charging
+                    , response, "CHARGER_STOP")
+
             elif request.command == BluetoothCommand.WATER_START:
-                if self.charge_state.pid == '':
+                if state_info.pid == '':
                     response.success = False
                     response.code = 30
                     response.message = 'bluetooth not found'
                     return response
-                if not self.charge_state.has_contact:
+                if not state_info.has_contact:
                     response.success = False
                     response.code = 32
                     response.message = 'bluetooth no data'
                     return response
-                if self.charge_state.is_waterflooding:
+                if state_info.is_waterflooding:
                     response.success = True
                     response.code = 0
                     response.message = 'success'
@@ -414,62 +395,49 @@ class BluetoothChargeServer(Node):
                 send_d = self.send_heartbeat_data.copy()
                 if self.use_bluetooth_protocol_new:
                     send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
-                    send_d.append('01' if self.charge_state.is_charging else '00')
+                    send_d.append('01' if state_info.is_charging else '00')
                     send_d.append('01')
-                    send_d.append('01' if self.charge_state.manual_enable_stu else '00')
-                    send_d.append(self.crc8(send_d)); send_d.append('16')
+                    send_d.append('01' if state_info.manual_enable_stu else '00')
                 else:
                     send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '02'; send_d[11] = '00'
                     send_d.append('00'); send_d.append('01')
-                    send_d.append(self.crc8(send_d)); send_d.append('16')
-                self.send_data = bytes.fromhex(''.join(send_d))
-                t1 = time.time()
-                while True:
-                    if self.charge_state.is_waterflooding:
-                        response.success = True; response.code = 0; response.message = 'success'
-                        return response
-                    elif time.time() - t1 > 10:
-                        response.success = False; response.code = 13; response.message = 'timeout response'
-                        return response
-                    else: time.sleep(1)
+
+                self._wait_and_check(send_d, lambda cur_state: cur_state.is_waterflooding
+                    , response, "WATER_START")
 
             elif request.command == BluetoothCommand.WATER_STOP:
-                if self.charge_state.pid == '':
+                with self._state_lock:
+                    state_info = self.charge_state
+                if state_info.pid == '':
                     response.success = False; response.code = 30; response.message = 'bluetooth not found'
                     return response
-                if not self.charge_state.is_waterflooding:
+                if not state_info.is_waterflooding:
                     response.success = True; response.code = 0; response.message = 'success'
                     return response
                 send_d = self.send_heartbeat_data.copy()
                 if self.use_bluetooth_protocol_new:
                     send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
-                    send_d.append('01' if self.charge_state.is_charging else '00')
+                    send_d.append('01' if state_info.is_charging else '00')
                     send_d.append('00')
-                    send_d.append('01' if self.charge_state.manual_enable_stu else '00')
-                    send_d.append(self.crc8(send_d)); send_d.append('16')
+                    send_d.append('01' if state_info.manual_enable_stu else '00')
                 else:
                     send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '02'; send_d[11] = '00'
                     send_d.append('00'); send_d.append('02')
-                    send_d.append(self.crc8(send_d)); send_d.append('16')
-                self.send_data = bytes.fromhex(''.join(send_d))
-                t1 = time.time()
-                while True:
-                    if not self.charge_state.is_waterflooding:
-                        response.success = True; response.code = 0; response.message = 'success'
-                        return response
-                    elif time.time() - t1 > 10:
-                        response.success = False; response.code = 13; response.message = 'timeout response'
-                        return response
-                    else: time.sleep(1)
+
+                self._wait_and_check(send_d, lambda cur_state: not cur_state.is_waterflooding
+                    , response, "WATER_STOP")
 
             elif request.command == BluetoothCommand.ENABLE_MANUAL_ADD_WATER:
-                if self.charge_state.pid == '':
+                with self._state_lock:
+                    state_info = self.charge_state
+
+                if state_info.pid == '':
                     response.success = False; response.code = 30; response.message = 'bluetooth not found'
                     return response
-                if not self.charge_state.has_contact:
+                if not state_info.has_contact:
                     response.success = False; response.code = 32; response.message = 'bluetooth no data'
                     return response
-                if self.charge_state.manual_enable_stu:
+                if state_info.manual_enable_stu:
                     response.success = True; response.code = 0; response.message = 'success'
                     return response
                 if not self.use_bluetooth_protocol_new:
@@ -477,26 +445,20 @@ class BluetoothChargeServer(Node):
                     return response
                 send_d = self.send_heartbeat_data.copy()
                 send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
-                send_d.append('01' if self.charge_state.is_charging else '00')
-                send_d.append('01' if self.charge_state.is_waterflooding else '00')
+                send_d.append('01' if state_info.is_charging else '00')
+                send_d.append('01' if state_info.is_waterflooding else '00')
                 send_d.append('01')
-                send_d.append(self.crc8(send_d)); send_d.append('16')
-                self.send_data = bytes.fromhex(''.join(send_d))
-                t1 = time.time()
-                while True:
-                    if self.charge_state.manual_enable_stu:
-                        response.success = True; response.code = 0; response.message = 'success'
-                        return response
-                    elif time.time() - t1 > 10:
-                        response.success = False; response.code = 13; response.message = 'timeout response'
-                        return response
-                    else: time.sleep(1)
 
+                self._wait_and_check(send_d, lambda cur_state: cur_state.manual_enable_stu
+                    , response, "ENABLE_MANUAL_ADD_WATER")
+                
             elif request.command == BluetoothCommand.DISABLE_MANUAL_ADD_WATER:
-                if self.charge_state.pid == '':
+                with self._state_lock:
+                    state_info = self.charge_state
+                if state_info.pid == '':
                     response.success = False; response.code = 30; response.message = 'bluetooth not found'
                     return response
-                if not self.charge_state.manual_enable_stu:
+                if not state_info.manual_enable_stu:
                     response.success = True; response.code = 0; response.message = 'success'
                     return response
                 if not self.use_bluetooth_protocol_new:
@@ -504,20 +466,11 @@ class BluetoothChargeServer(Node):
                     return response
                 send_d = self.send_heartbeat_data.copy()
                 send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
-                send_d.append('01' if self.charge_state.is_charging else '00')
-                send_d.append('01' if self.charge_state.is_waterflooding else '00')
+                send_d.append('01' if state_info.is_charging else '00')
+                send_d.append('01' if state_info.is_waterflooding else '00')
                 send_d.append('00')
-                send_d.append(self.crc8(send_d)); send_d.append('16')
-                self.send_data = bytes.fromhex(''.join(send_d))
-                t1 = time.time()
-                while True:
-                    if not self.charge_state.manual_enable_stu:
-                        response.success = True; response.code = 0; response.message = 'success'
-                        return response
-                    elif time.time() - t1 > 10:
-                        response.success = False; response.code = 13; response.message = 'timeout response'
-                        return response
-                    else: time.sleep(1)
+                self._wait_and_check(send_d, lambda cur_state: not cur_state.manual_enable_stu
+                    , response, "ENABLE_MANUAL_ADD_WATER")
 
             else:
                 self.get_logger().info(f'/charge_command: unsupported command {request.command}')
@@ -632,16 +585,17 @@ class BluetoothChargeServer(Node):
             self.connect_start_time = time.time()
             self.connect_exception = ""
             self.data_fields_last = []
-            self.charge_state.pid = ''
-            self.charge_state.has_contact = False
-            self.charge_state.is_charging = False
-            self.charge_state.is_waterflooding = False
-            self.charge_state.water_mode = "unknown"
-            self.charge_state.manual_enable_stu = False
-            self.charge_state.fault_stu = ""
-            self.charge_state.left_dis_sensor = -1
-            self.charge_state.right_dis_sensor = -1
-            self.charge_state.switch_stu = ""
+            with self._state_lock:
+                self.charge_state.pid = ''
+                self.charge_state.has_contact = False
+                self.charge_state.is_charging = False
+                self.charge_state.is_waterflooding = False
+                self.charge_state.water_mode = "unknown"
+                self.charge_state.manual_enable_stu = False
+                self.charge_state.fault_stu = ""
+                self.charge_state.left_dis_sensor = -1
+                self.charge_state.right_dis_sensor = -1
+                self.charge_state.switch_stu = ""
             self.bluetooth_connected = None
             self.disconnect_bluetooth = False
 
@@ -688,29 +642,10 @@ class BluetoothChargeServer(Node):
         finally:
             self._connect_lock.release()
 
-    def get_bluetooth_adapter_simple(self):
-        """简单获取第一个 hci 设备"""
-        try:
-            result = subprocess.run(
-                ['hciconfig'], 
-                capture_output=True, 
-                text=True
-            )
-            # 匹配 hci0: 或 hci1: 等
-            match = re.search(r'(hci\d+):', result.stdout)
-            if match:
-                adapter = match.group(1)
-                self.get_logger().info(f"检测到蓝牙适配器: {adapter}")
-                return adapter
-        except Exception as e:
-            self.get_logger().info(f"获取适配器失败: {e}")
-        return "hci0"
-
     async def create_bleakclient(self, address):
         client = None
 
         self.get_logger().info("获取蓝牙设备名字")
-        self.bluetooth_adapter = self.get_bluetooth_adapter_simple()
 
         try:
             self.get_logger().info("搜索附近的蓝牙......")
@@ -732,10 +667,10 @@ class BluetoothChargeServer(Node):
                 self.get_logger().info(f'address: {ble_device.address}')
                 self.get_logger().info(f'name: {ble_device.name}')
                 self.get_logger().info(f'rssi: {devices[address][1].rssi}')
-                client = BleakClient(ble_device, adapter=self.bluetooth_adapter)
+                client = BleakClient(ble_device)
             else:
                 self.get_logger().info(f'未搜索到mac: {address}，尝试直接连接')
-                client = BleakClient(address, adapter=self.bluetooth_adapter)
+                client = BleakClient(address)
 
             with self._client_lock:
                 self._client = client
@@ -790,9 +725,12 @@ class BluetoothChargeServer(Node):
                     self.get_logger().info('收到主动断开请求')
                     break
 
-                if self.send_data is not None:
-                    await client.write_gatt_char(self.uuid_write, self.send_data, response=False)
-                    self.send_data = None
+                with self._data_lock:
+                    send_data = self.send_data
+                if send_data is not None:
+                    await client.write_gatt_char(self.uuid_write, send_data, response=False)
+                    with self._data_lock:
+                        self.send_data = None
 
                 current_time = time.time()
                 if current_time - self.heartbeat_time > 0.5:
@@ -847,30 +785,31 @@ class BluetoothChargeServer(Node):
                         self.get_logger().info(f'上一次数据域内容是: {self.data_fields_last}')
                         self.get_logger().info(f'这一次数据域内容是: {data_fields_save}')
                         self.data_fields_last = data_fields_save
-                    if self.use_bluetooth_protocol_new:                        
-                        self.charge_state.is_charging = (data_fields[0] == '01')
-                        self.charge_state.has_contact = (data_fields[5] == '01')
-                        # 00 未加水， 01 自动加水， 02 手动加水
-                        self.charge_state.is_waterflooding = ((data_fields[6] == '01') or (data_fields[6] == '02'))
-                        if data_fields[6] == '01':
-                            self.charge_state.water_mode = "auto"
-                        elif data_fields[6] == '02':
-                            self.charge_state.water_mode = "manual"
-                        elif data_fields[6] == '00':
-                            self.charge_state.water_mode = "idle"
+                    with self._state_lock:
+                        if self.use_bluetooth_protocol_new:                        
+                            self.charge_state.is_charging = (data_fields[0] == '01')
+                            self.charge_state.has_contact = (data_fields[5] == '01')
+                            # 00 未加水， 01 自动加水， 02 手动加水
+                            self.charge_state.is_waterflooding = ((data_fields[6] == '01') or (data_fields[6] == '02'))
+                            if data_fields[6] == '01':
+                                self.charge_state.water_mode = "auto"
+                            elif data_fields[6] == '02':
+                                self.charge_state.water_mode = "manual"
+                            elif data_fields[6] == '00':
+                                self.charge_state.water_mode = "idle"
+                            else:
+                                self.charge_state.water_mode = "unknown"
+                            self.charge_state.manual_enable_stu = (data_fields[7] == '01')
+                            self.charge_state.fault_stu = parse_fault(data_fields[8], self.fault_map, "无故障")
+                            self.charge_state.left_dis_sensor = calculate_dis(data_fields[9], data_fields[10])
+                            self.charge_state.right_dis_sensor = calculate_dis(data_fields[11], data_fields[12])
+                            switch_stu_value = int(data_fields[13], 16)                         
+                            self.charge_state.switch_stu = self.switch_stu_map.get(switch_stu_value, "未知错误")
                         else:
-                            self.charge_state.water_mode = "unknown"
-                        self.charge_state.manual_enable_stu = (data_fields[7] == '01')
-                        self.charge_state.fault_stu = parse_fault(data_fields[8], self.fault_map, "无故障")
-                        self.charge_state.left_dis_sensor = calculate_dis(data_fields[9], data_fields[10])
-                        self.charge_state.right_dis_sensor = calculate_dis(data_fields[11], data_fields[12])
-                        switch_stu_value = int(data_fields[13], 16)                         
-                        self.charge_state.switch_stu = self.switch_stu_map.get(switch_stu_value, "未知错误")
-                    else:
-                        self.charge_state.is_charging = (data_list[12] == '01')
-                        self.charge_state.has_contact = (data_list[17] == '01')
-                        self.charge_state.is_waterflooding = (data_list[19] == '01')
-                        self.charge_state.water_mode = "manual" if data_list[18] == '01' else "auto"
+                            self.charge_state.is_charging = (data_list[12] == '01')
+                            self.charge_state.has_contact = (data_list[17] == '01')
+                            self.charge_state.is_waterflooding = (data_list[19] == '01')
+                            self.charge_state.water_mode = "manual" if data_list[18] == '01' else "auto"
                 except IndexError:
                     pass
         else:
