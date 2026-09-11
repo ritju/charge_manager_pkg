@@ -301,8 +301,8 @@ class BluetoothChargeServer(Node):
                 if not state_info.has_contact:
                     self.get_logger().info('/charge_command CHARGER_START: bluetooth no data (no contact)')
                     response.success = False
-                    response.code = 32
-                    response.message = 'bluetooth no data'
+                    response.code = 23
+                    response.message = 'not in position'
                     return response
                 # Send BLE charge start command (reuse existing logic)
                 time.sleep(0.5)
@@ -385,8 +385,8 @@ class BluetoothChargeServer(Node):
                     return response
                 if not state_info.has_contact:
                     response.success = False
-                    response.code = 32
-                    response.message = 'bluetooth no data'
+                    response.code = 23
+                    response.message = 'not in position'
                     return response
                 if state_info.is_waterflooding:
                     response.success = True
@@ -436,7 +436,7 @@ class BluetoothChargeServer(Node):
                     response.success = False; response.code = 30; response.message = 'bluetooth not found'
                     return response
                 if not state_info.has_contact:
-                    response.success = False; response.code = 32; response.message = 'bluetooth no data'
+                    response.success = False; response.code = 23; response.message = 'not in position'
                     return response
                 if state_info.manual_enable_stu:
                     response.success = True; response.code = 0; response.message = 'success'

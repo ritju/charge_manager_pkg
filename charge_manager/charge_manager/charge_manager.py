@@ -63,9 +63,9 @@ class chargeManager(Node):
 
         # /charger/id subscription
         charger_id_sub_qos = QoSProfile(depth=1)
-        charger_id_sub_qos.reliability = ReliabilityPolicy.BEST_EFFORT
+        charger_id_sub_qos.reliability = ReliabilityPolicy.RELIABLE
         charger_id_sub_qos.history = HistoryPolicy.KEEP_LAST
-        charger_id_sub_qos.durability = DurabilityPolicy.VOLATILE
+        charger_id_sub_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
         self.charger_id_sub = self.create_subscription(String, '/charger/id', self.charger_id_sub_callback, charger_id_sub_qos)
         
         charger_state_qos = QoSProfile(depth=1)
