@@ -1,0 +1,19 @@
+# 测试专用桩接口：驱动 StubSystemServer 的模拟周边状态与失败注入。
+# 调用时全字段覆盖（携带当前其他字段值即可）；失败标志为粘性，置位后对应
+# 服务持续返回失败，直到再次调用本服务清除。
+string charger_id
+bool is_undocking_state
+bool charger_position_bool
+float32 battery_capacity
+float32 raw_linear_x
+float32 raw_linear_y
+float32 raw_angular_z
+bool add_water_enable
+bool manual_add_water_enable
+bool start_apriltag_fail
+bool stop_apriltag_fail
+bool switch_resolution_fail
+bool off_pc_power_fail
+---
+bool success
+string message

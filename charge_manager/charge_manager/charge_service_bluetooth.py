@@ -24,6 +24,8 @@ from charge_manager.utils import parse_fault, calculate_dis
 
 class BluetoothChargeServer(Node):
     def __init__(self, name):
+        super().__init__(name)
+
         # 定义外部映射表
         self.fault_map = {
             0x01: "无法关闭加水电磁阀",
@@ -39,7 +41,6 @@ class BluetoothChargeServer(Node):
             0x01: "行程未到位",
         }
         
-        super().__init__(name)
         env_var = os.environ.get('DOCK_USE_BLUETOOTH_RESTORE_SERVICE', 'False')
         self.declare_parameter("use_bluetooth_restore_service", env_var)
         self.use_bluetooth_restore_service = self.get_parameter("use_bluetooth_restore_service").get_parameter_value().string_value.strip().lower()

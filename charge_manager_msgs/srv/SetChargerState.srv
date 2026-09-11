@@ -1,0 +1,8 @@
+# 测试专用桩接口：全量覆盖模拟的充电器状态，并控制连接失败注入。
+# charge_state 的所有字段都会被应用到桩的模拟状态；connect_fail 是粘性标志，
+# 置位后 /connect_bluetooth 会一直失败，直到再次调用本服务将其清除。
+ChargeState2 state
+bool connect_fail
+---
+bool success
+string message
