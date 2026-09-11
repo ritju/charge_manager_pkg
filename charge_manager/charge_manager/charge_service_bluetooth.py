@@ -266,11 +266,11 @@ class BluetoothChargeServer(Node):
             with self._state_lock:
                 state_info = self.charge_state
             if checker(state_info):
-                self.get_logger().info("Wait for %s success", cmd);
+                self.get_logger().info(f"Wait for {cmd} success");
                 response.success = True; response.code = 0; response.message = 'success'
                 return response
             elif time.time() - t1 > 10:
-                self.get_logger().info("Wait for %s timeout", cmd);
+                self.get_logger().info(f"Wait for {cmd} timeout", cmd);
                 response.success = False; response.code = 13; response.message = 'timeout response'
                 return response
             else: time.sleep(1)
@@ -278,7 +278,7 @@ class BluetoothChargeServer(Node):
     def charge_command_callback(self, request, response):
         """Service callback for /charge_command - returns structured error codes."""
         try:
-            self.get_logger().info('got /charge_command %d', request.command)
+            self.get_logger().info(f'got /charge_command {request.command}')
             state_info = None
             with self._state_lock:
                 state_info = self.charge_state
