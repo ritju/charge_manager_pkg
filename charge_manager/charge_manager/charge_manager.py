@@ -284,7 +284,10 @@ class chargeManager(Node):
         cmd_req.command = BluetoothCommand.CHARGER_START
         try:
             future = self.charge_command_client.call_async(cmd_req)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=15.0)
+            # 节点已由 MultiThreadedExecutor 托管, 不能嵌套 spin, 否则节点会被移出主 executor
+            end = time.monotonic() + 15.0
+            while not future.done() and time.monotonic() < end:
+                time.sleep(0.05)
             cmd_resp = future.result()
             if cmd_resp is not None:
                 response.code = cmd_resp.code
@@ -334,7 +337,10 @@ class chargeManager(Node):
             self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
 
             #self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
-            rclpy.spin_until_future_complete(self, self.charge_action_client_sendgoal_future, timeout_sec=10.0)
+            # 节点已由 MultiThreadedExecutor 托管, 不能嵌套 spin, 否则节点会被移出主 executor
+            end = time.monotonic() + 10.0
+            while not self.charge_action_client_sendgoal_future.done() and time.monotonic() < end:
+                time.sleep(0.05)
             if not self.charge_action_client_sendgoal_future.done():
                 self.get_logger().info('/charger/start_docking2: charge action goal timeout')
                 self.charger_state.is_docking = False
@@ -350,7 +356,9 @@ class chargeManager(Node):
                 return response
             self.get_logger().info('=== charge action ===     goal accepted.')
             self.charge_get_future_result = goal_handle.get_result_async()
-            rclpy.spin_until_future_complete(self, self.charge_get_future_result, timeout_sec=480.0)
+            end = time.monotonic() + 480.0
+            while not self.charge_get_future_result.done() and time.monotonic() < end:
+                time.sleep(0.05)
             if not self.charge_get_future_result.done():
                 self.get_logger().info('/charger/start_docking2: charge action result timeout')
                 self.charger_state.is_docking = False

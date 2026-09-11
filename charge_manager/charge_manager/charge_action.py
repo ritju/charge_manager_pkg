@@ -645,10 +645,13 @@ class ChargeAction(Node):
         self.dock_completed = True
         self.stop_loop = True
         if self.dock_executing:
-            goal_handle = self.dock_client_sendgoal_future.result()
-            goal_handle.cancel_goal_async()
+            if self.dock_client_sendgoal_future is not None:
+                goal_handle = self.dock_client_sendgoal_future.result()
+                goal_handle.cancel_goal_async()
+            else:
+                self.dock_executing = False
             self.get_logger().info('cancel dock action')
-            self.dock_executing = True
+            
         if self.apriltag_detecting:
             self.get_logger().info('-------- call /stop_detect_apriltag service --------')
             request = StopDetectApriltag.Request()
