@@ -10,6 +10,8 @@ uint8 type
 string marker
 string protocol
 geometry_msgs/Pose delta
+# 回充流程标识, 由 /charger/start_docking2 生成并透传; 其他入口传空串
+string session_id
 ---
 bool success
 uint16 code

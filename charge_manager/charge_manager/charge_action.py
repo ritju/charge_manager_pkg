@@ -16,6 +16,8 @@ import signal
 from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth, StartBluetooth, StopBluetooth
 from charge_manager_msgs.action import Charge
 from capella_ros_dock_msgs.action import Dock
+from capella_ros_dock_msgs.msg import ChargeErrorCode
+from capella_ros_dock_msgs.msg import ChargeErrorInfo
 from capella_ros_msg.msg import Battery
 from capella_ros_service_interfaces.msg import ChargeState, RgbCameraResolution
 from std_srvs.srv import Empty as EmptyForSrv
@@ -140,6 +142,15 @@ class ChargeAction(Node):
 
         self.charge_type = ''
         self.goal_handle = None
+
+        # /charge/error_info: 仅在判定到不可重试错误时发布, 每个流程最多一条
+        # session 由 Charge.Goal 透传(start_docking2 生成), 非 start_docking2 触发时为空串
+        charge_error_qos = QoSProfile(depth=1)
+        charge_error_qos.reliability = ReliabilityPolicy.RELIABLE
+        charge_error_qos.history = HistoryPolicy.KEEP_LAST
+        charge_error_qos.durability = DurabilityPolicy.VOLATILE
+        self.charge_error_info_pub_ = self.create_publisher(ChargeErrorInfo, '/charge/error_info', charge_error_qos, callback_group=self.cb_group)
+
         self.init_params() 
         
         env = os.environ.get('CHARGE_ACTION_ALLOW_POWER_OFF_ON', 'False')
@@ -270,7 +281,32 @@ class ChargeAction(Node):
         self.request_marker = ''
         self.request_protocol = ''
         self.request_delta = None
+
+        # 本次流程的 session(start_docking2 生成, 经 Charge.Goal 透传, 其余入口为空串)
+        self.session_id = ''
+        # 本次流程的首个不可重试错误码(SUCCESS 表示无错误), 同时作为 action result 的 code
+        self.charge_error_code = ChargeErrorCode.SUCCESS
+        # dock action 返回的细分码
+        self.dock_result_code = ChargeErrorCode.SUCCESS
+        # 连续失败上限: 无 hci 设备 / 蓝牙连接失败
+        self.bluetooth_connect_fail_num_max = 5
         
+
+    def publish_charge_error(self, code, message):
+        """发布本次流程的首个不可重试错误码(每个流程最多一条, 同时作为 action result 的 code)。"""
+        if self.charge_error_code != ChargeErrorCode.SUCCESS:
+            self.get_logger().info(f'charge error already reported(code={self.charge_error_code}), ignore code={code}')
+            return
+        self.charge_error_code = code
+        msg = ChargeErrorInfo()
+        msg.session_id = self.session_id
+        msg.code = code
+        msg.message = message
+        msg.source = 'charge_action'
+        self.charge_error_info_pub_.publish(msg)
+        self.get_logger().info(
+            f'publish /charge/error_info: session={msg.session_id or "<empty>"}, code={code}, '
+            f'message={message}, source=charge_action')
 
     def is_undocking_state_sub_callback(self, msg):
         self.is_undocking_state = msg.data
@@ -326,6 +362,9 @@ class ChargeAction(Node):
                             f'检测到/raw_vel topic: 3秒内超过阈值的比例 {ratio:.2%} >= 80% (total: {total}, exceed_count: {exceed_count})，停止充电。'
                         )
                         self.stop_loop = True
+                        self.publish_charge_error(
+                            ChargeErrorCode.NOT_IN_POSITION,
+                            f'moved while charging, raw_vel exceed ratio {ratio:.2%} >= 80%')
                     else:
                         self.get_logger().info(
                             f'检测到/raw_vel topic: 3秒内超过阈值的比例 {ratio:.2%} (total: {total}, exceed_count: {exceed_count})', throttle_duration_sec=5.0
@@ -361,6 +400,12 @@ class ChargeAction(Node):
                     self.get_logger().info(f'hci devices: {hci_devices}')
                 else:
                     self.get_logger().info(f'No hci device detected.')
+                    if self.bluetooth_connect_num >= self.bluetooth_connect_fail_num_max:
+                        # 连续多轮都没有 hci 设备, 判定不可恢复: 仅上报错误码,
+                        # 停止本次回充由上层调用 stop(取消 goal)触发
+                        self.publish_charge_error(
+                            ChargeErrorCode.BLUETOOTH_NOT_FOUND,
+                            f'bluetooth not found: no hci device in {self.bluetooth_connect_num} attempts')
                     if (not self.power_off_on_executing and 
                         self.charge_action_allow_power_off_on and 
                         self.power_off_on_client_.wait_for_service(2) and
@@ -392,6 +437,7 @@ class ChargeAction(Node):
             dock_msg.mac = self.mac
             dock_msg.marker = self.request_marker
             dock_msg.protocol = self.request_protocol
+            dock_msg.session_id = self.session_id
             dock_msg.delta = self.request_delta
             while not self.dock_client_.wait_for_server(2):
                 self.get_logger().info('Dock action server not available.', throttle_duration_sec = 2)
@@ -488,6 +534,7 @@ class ChargeAction(Node):
             self.request_marker = goal_request.marker
             self.request_protocol = goal_request.protocol
             self.request_delta = goal_request.delta
+            self.session_id = goal_request.session_id
             self.get_logger().info('charge_action_goal_callback')
             self.get_logger().info(f'self.mac: {self.mac}')
             self.get_logger().info(f'marker: {self.request_marker}, protocol: {self.request_protocol}')
@@ -511,7 +558,9 @@ class ChargeAction(Node):
         self.request_marker = goal_handle.request.marker
         self.request_protocol = goal_handle.request.protocol
         self.request_delta = goal_handle.request.delta
+        self.session_id = goal_handle.request.session_id
         self.get_logger().info(f'request_marker: {self.request_marker}, request_protocol: {self.request_protocol}')
+        self.get_logger().info(f'session_id: {self.session_id or "<empty>"}')
         if re_restore or re_charge_type:
             self.dock_completed = True
             self.charger_position_bool = True
@@ -535,9 +584,11 @@ class ChargeAction(Node):
         while True:
             if self.dock_goal_rejected:
                 self.get_logger().info("return Charge action for reason: dock action is rejected.")
+                self.publish_charge_error(
+                    ChargeErrorCode.INTERFACE_FAILED, 'dock failed: dock action goal rejected')
                 result = Charge.Result()
                 result.success = False
-                result.code = 40
+                result.code = ChargeErrorCode.INTERFACE_FAILED
                 self.goal_handle.abort()
                 try:
                     self.get_logger().info(f'存储充电状态 0 和 mac: {self.mac} 到/map/charge_restore.txt.')
@@ -580,8 +631,21 @@ class ChargeAction(Node):
                     except Exception as e:
                         self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/core_restart.txt for processing stop /charge action.")
                     result = Charge.Result()
-                    result.code = 5 if self.charge_cancelled else (40 if self.dock_failed else 0)
-                    result.success = not (self.dock_failed or self.charge_cancelled)
+                    if self.charge_cancelled:
+                        result.code = ChargeErrorCode.CANCELLED
+                    elif self.charge_error_code != ChargeErrorCode.SUCCESS:
+                        # 已上报的细分码: 移动停充/无接触, 或由 dock result 透传的码
+                        result.code = self.charge_error_code
+                    elif self.dock_failed:
+                        result.code = ChargeErrorCode.UNKNOWN
+                    else:
+                        # 对接流程结束但没有建立充电接触
+                        self.publish_charge_error(
+                            ChargeErrorCode.NOT_IN_POSITION,
+                            'not in position: charge action finished without charger contact')
+                        result.code = self.charge_error_code
+                    result.success = (result.code == ChargeErrorCode.SUCCESS)
+                    self.get_logger().info(f'/charge action result => code: {result.code}, success: {result.success}')
                     self.goal_handle.succeed()
                     try:
                         self.get_logger().info(f'存储充电状态 0 和 mac: {self.mac} 到/map/charge_restore.txt.')
@@ -672,12 +736,20 @@ class ChargeAction(Node):
 
     def connect_bluetooth_done_callback(self, future_connect_bluetooth):
         response = future_connect_bluetooth.result()
-        self.get_logger().info(f'bluetooth connection {"True" if response.success else "False"}, cost {response.connection_time} seconds, result =>{response.result}')
+        self.get_logger().info(
+            f'bluetooth connection {"True" if response.success else "False"}, '
+            f'cost {response.connection_time} seconds, code =>{response.code}, result =>{response.result}')
         self.bluetooth_connected = response.success
         self.bluetooth_connected_time = time.time()
         if response.success:
-            self.bluetooth_connect_num = 0    
-            
+            self.bluetooth_connect_num = 0
+        elif self.bluetooth_connect_num >= self.bluetooth_connect_fail_num_max:
+            # 连续多次连接失败, 判定不可恢复: 仅上报错误码, 码由蓝牙服务器判定
+            # (30 对端蓝牙设备不存在 / 31 蓝牙连接失败 / 2 有其它蓝牙操作在进行)
+            # 停止本次回充由上层调用 stop(取消 goal)触发, 避免本节点自做收尾导致状态与原因不一致
+            self.publish_charge_error(
+                response.code if response.code else ChargeErrorCode.BLUETOOTH_CONNECT_ERROR,
+                response.result or f'bluetooth connect failed {self.bluetooth_connect_num} times')
         self.connect_bluetooth_executing = False
     
     def disconnect_bluetooth_callback(self, future):
@@ -705,11 +777,15 @@ class ChargeAction(Node):
 
     def dock_get_result_callback(self, future):
         result = future.result().result
-        self.get_logger().info('Dock result => is_docked: {}'.format(result.is_docked))
+        self.dock_result_code = result.code
+        self.get_logger().info('Dock result => is_docked: {}, code: {}'.format(result.is_docked, result.code))
         if not result.is_docked:
             self.get_logger().info('Dock action failed, Charge Action aborted')
             self.dock_failed = True
             self.stop_loop = True
+            # 透传 dock 的细分码作为本次流程的码; dock 侧已自行上报同一码, 这里不重复上报
+            if result.code != ChargeErrorCode.SUCCESS and self.charge_error_code == ChargeErrorCode.SUCCESS:
+                self.charge_error_code = result.code
         self.dock_executing = False
         self.dock_completed = True
         

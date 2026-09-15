@@ -10,6 +10,9 @@ import subprocess
 from signal import SIGINT, SIGTERM
 import time
 import os
+import re
+import math
+import threading
 
 from std_srvs.srv import Empty
 from std_msgs.msg import String
@@ -22,16 +25,36 @@ from charge_manager_msgs.srv import StartBluetooth, StopBluetooth
 from capella_ros_service_interfaces.msg import ChargeState
 from capella_ros_service_interfaces.srv import ChargeStart, DockStart
 from charge_manager_msgs.srv import ChargeCommand
+from capella_ros_dock_msgs.msg import ChargeErrorCode
+from capella_ros_dock_msgs.msg import ChargeErrorInfo
 from geometry_msgs.msg import Twist
 
-# Charge action / dock 错误码 → 消息映射
+# Charge action / dock 错误码 → 消息映射(码值取自 ChargeErrorCode.msg, 文本用于发布端未提供 message 时兜底)
 CHARGE_ERROR_MESSAGES = {
-    0: 'success',
-    5: 'cancelled',
-    10: 'not exist',
-    13: 'timeout response',
-    40: 'unknown',
+    ChargeErrorCode.SUCCESS: 'success',
+    ChargeErrorCode.ALREADY_RUNNING: 'already running',
+    ChargeErrorCode.BLOCKED: 'blocked',
+    ChargeErrorCode.INVALID_PARAM: 'invalid param',
+    ChargeErrorCode.CANCELLED: 'cancelled',
+    ChargeErrorCode.INTERFACE_FAILED: 'interface failed',
+    ChargeErrorCode.EXCEED_RUNTIME: 'exceed runtime',
+    ChargeErrorCode.TIMEOUT_CHANGE_POSE: 'timeout change pose',
+    ChargeErrorCode.TIMEOUT_RESPONSE: 'timeout response',
+    ChargeErrorCode.CAMERA_NOT_READY: 'camera not ready',
+    ChargeErrorCode.OBSTACLE: 'obstacle',
+    ChargeErrorCode.MARKER_NOT_VISIBLE: 'marker not visible',
+    ChargeErrorCode.NOT_IN_POSITION: 'not in position',
+    ChargeErrorCode.BLUETOOTH_NOT_FOUND: 'bluetooth not found',
+    ChargeErrorCode.BLUETOOTH_CONNECT_ERROR: 'bluetooth connect error',
+    ChargeErrorCode.BLUETOOTH_NO_DATA: 'bluetooth no data',
+    ChargeErrorCode.INVALID_PROTOCOL: 'invalid protocol',
+    ChargeErrorCode.UNKNOWN: 'unknown',
 }
+
+# /charger/start_docking2 等待底层 /charge action 结果的兜底超时
+DOCKING2_RESULT_TIMEOUT = 480.0
+# mac 格式: XX:XX:XX:XX:XX:XX
+MAC_PATTERN = re.compile(r'([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
 
 class chargeManager(Node):
     
@@ -134,6 +157,22 @@ class chargeManager(Node):
         # /charge_command service client (async, with error codes)
         self.charge_command_client = self.create_client(ChargeCommand, '/charge_command', callback_group=callback_group_type)
 
+        # /charge/error_info: 回充流程错误码
+        # 订阅放 Reentrant 组, 不能与 /charger/start_docking2 的 MutuallyExclusive 组同组,
+        # 否则等待期间该回调得不到执行
+        charge_error_qos = QoSProfile(depth=1)
+        charge_error_qos.reliability = ReliabilityPolicy.RELIABLE
+        charge_error_qos.history = HistoryPolicy.KEEP_LAST
+        charge_error_qos.durability = DurabilityPolicy.VOLATILE
+        self.charge_error_info_pub_ = self.create_publisher(ChargeErrorInfo, '/charge/error_info', charge_error_qos, callback_group=callback_group_type)
+        self.charge_error_info_sub_ = self.create_subscription(ChargeErrorInfo, '/charge/error_info', self.charge_error_info_sub_callback, charge_error_qos, callback_group=callback_group_type)
+
+        # 当前 /charger/start_docking2 的 session, 其余时刻为空串
+        self.charge_session = ''
+        # 本次 session 收到的首个错误信息
+        self.charge_error = None
+        self.charge_error_event = threading.Event()
+
         # restore charge
         self.get_logger().info('restore charging or not ...')
         time.sleep(3)
@@ -209,7 +248,85 @@ class chargeManager(Node):
             return
         cmd_req = ChargeCommand.Request()
         cmd_req.command = command
-        self.charge_command_client.call_async(cmd_req)
+        future = self.charge_command_client.call_async(cmd_req)
+        future.add_done_callback(self.charge_command_done_callback)
+
+    def charge_command_done_callback(self, future):
+        """把 /charge_command 返回的非 0 错误码透传到 /charge/error_info。
+
+        蓝牙服务器内部判定(如协议版本不匹配、蓝牙无数据)只能通过该响应到达这里,
+        因此 charge_manager 作为发布端代发这些码。
+        """
+        try:
+            cmd_resp = future.result()
+        except Exception as e:
+            self.get_logger().info(f'/charge_command response exception: {e}')
+            return
+        if cmd_resp is None:
+            self.get_logger().info('/charge_command returned None')
+            return
+        self.get_logger().info(f'/charge_command response code={cmd_resp.code}, message={cmd_resp.message}')
+        if cmd_resp.code != ChargeErrorCode.SUCCESS:
+            self.publish_charge_error(cmd_resp.code, cmd_resp.message, 'charge_manager')
+
+    def charge_error_info_sub_callback(self, msg):
+        """只接受本次 start_docking2 session 的首个错误码, 其余一律忽略。"""
+        if not self.charge_session or msg.session_id != self.charge_session:
+            self.get_logger().info(
+                f'received /charge/error_info not for current session: session={msg.session_id or "<empty>"}, '
+                f'code={msg.code}, message={msg.message}, source={msg.source} (ignored)')
+            return
+        if self.charge_error is not None:
+            self.get_logger().info(
+                f'received /charge/error_info but first one already set, ignore: code={msg.code}, source={msg.source}')
+            return
+        self.charge_error = msg
+        self.get_logger().info(
+            f'received first /charge/error_info for session {msg.session_id}: code={msg.code}, '
+            f'message={msg.message}, source={msg.source}')
+        self.charge_error_event.set()
+
+    def publish_charge_error(self, code, message, source):
+        msg = ChargeErrorInfo()
+        msg.session_id = self.charge_session
+        msg.code = code
+        msg.message = message
+        msg.source = source
+        self.charge_error_info_pub_.publish(msg)
+        self.get_logger().info(
+            f'publish /charge/error_info: session={msg.session_id or "<empty>"}, code={code}, '
+            f'message={message}, source={source}')
+
+    @staticmethod
+    def _new_charge_session():
+        return f'{int(time.time() * 1000)}-{os.getpid()}'
+
+    @staticmethod
+    def _validate_dock_start_request(request):
+        """校验 /charger/start_docking2 入参, 返回非法参数名, 全部合法返回空串。
+
+        marker 允许空串(dock 侧会回退为按 mac 查 marker_and_mac_vector), 非空时必须可转整数,
+        否则 dock 会静默回退; mac 必须为 XX:XX:XX:XX:XX:XX 格式, 否则 dock 侧无法定位 marker。
+        """
+        if not MAC_PATTERN.fullmatch(request.mac or ''):
+            return 'mac'
+        marker = request.marker or ''
+        if marker:
+            try:
+                int(marker)
+            except ValueError:
+                return 'marker'
+        delta_values = (
+            request.delta.position.x, request.delta.position.y, request.delta.position.z,
+            request.delta.orientation.x, request.delta.orientation.y,
+            request.delta.orientation.z, request.delta.orientation.w,
+        )
+        if any(math.isnan(v) or math.isinf(v) for v in delta_values):
+            return 'delta'
+        return ''
+
+    def _charge_error_response(self, code, message):
+        return code, (message if message else CHARGE_ERROR_MESSAGES.get(code, 'unknown'))
 
     def add_water_ctr_sub_callback(self, msg):
         if msg.data == True:
@@ -276,7 +393,7 @@ class chargeManager(Node):
         # Call /charge_command service asynchronously
         if not self.charge_command_client.wait_for_service(timeout_sec=5.0):
             self.get_logger().info('/charger/start2: /charge_command service not available')
-            response.code = 13
+            response.code = ChargeErrorCode.TIMEOUT_RESPONSE
             response.message = '/charge_command not exist'
             return response
         
@@ -295,28 +412,36 @@ class chargeManager(Node):
                 self.get_logger().info(f'/charger/start2: response code={cmd_resp.code}, message={cmd_resp.message}')
             else:
                 self.get_logger().info('/charger/start2: /charge_command returned None')
-                response.code = 13
+                response.code = ChargeErrorCode.TIMEOUT_RESPONSE
                 response.message = 'timeout response'
         except Exception as e:
             self.get_logger().info(f'/charger/start2: exception calling /charge_command: {e}')
-            response.code = 40
+            response.code = ChargeErrorCode.UNKNOWN
             response.message = f'unknown error: {e}'
         return response
 
     def charger_start_docking2_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start_docking2 service')
         self.get_logger().info(f'/charger/start_docking2: mac={request.mac}, marker={request.marker}, protocol={request.protocol}')
+        goal_accepted = False
         try:
+            # pre-check: invalid params
+            invalid_param = self._validate_dock_start_request(request)
+            if invalid_param:
+                self.get_logger().info(f'/charger/start_docking2: invalid param {invalid_param}')
+                response.code = ChargeErrorCode.INVALID_PARAM
+                response.message = f'invalid param {invalid_param}'
+                return response
             # pre-check: cancelled - already docking
             if self.charger_state.is_docking:
                 self.get_logger().info('/charger/start_docking2: cancelled - dock already in progress')
-                response.code = 1
+                response.code = ChargeErrorCode.ALREADY_RUNNING
                 response.message = 'already running'
                 return response
             # pre-check: charge action server available (with timeout)
             if not self.charge_action_client.wait_for_server(5):
                 self.get_logger().info('/charger/start_docking2: charge action server not available')
-                response.code = 10
+                response.code = ChargeErrorCode.INTERFACE_FAILED
                 response.message = 'charge action server not exist'
                 return response
             # pre-check: camera not ready (placeholder - user will implement camera check later)
@@ -328,12 +453,18 @@ class chargeManager(Node):
                     f.write('1\n')
             except Exception as e:
                 self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for /charger/start_docking2.")
+            # 开启本次回充流程的 session: 清空上次残留的错误码缓存, 之后才接受 /charge/error_info
+            self.charge_session = self._new_charge_session()
+            self.charge_error = None
+            self.charge_error_event.clear()
+            self.get_logger().info(f'/charger/start_docking2: session={self.charge_session}')
             self.charger_state.is_docking = True
             charge_msg = Charge.Goal()
             charge_msg.mac = request.mac
             charge_msg.marker = request.marker
             charge_msg.protocol = request.protocol
             charge_msg.delta = request.delta
+            charge_msg.session_id = self.charge_session
             self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
 
             #self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
@@ -343,30 +474,53 @@ class chargeManager(Node):
                 time.sleep(0.05)
             if not self.charge_action_client_sendgoal_future.done():
                 self.get_logger().info('/charger/start_docking2: charge action goal timeout')
+                self.charge_session = ''
                 self.charger_state.is_docking = False
-                response.code = 13
+                response.code = ChargeErrorCode.TIMEOUT_RESPONSE
                 response.message = 'timeout response'
                 return response
             goal_handle = self.charge_action_client_sendgoal_future.result()
             if not goal_handle.accepted:
                 self.get_logger().info('=== charge action ===     goal rejected !')
+                self.charge_session = ''
                 self.charger_state.is_docking = False
-                response.code = 10
+                response.code = ChargeErrorCode.INTERFACE_FAILED
                 response.message = 'action /charge failed'
                 return response
             self.get_logger().info('=== charge action ===     goal accepted.')
+            goal_accepted = True
             self.charge_get_future_result = goal_handle.get_result_async()
-            end = time.monotonic() + 480.0
-            while not self.charge_get_future_result.done() and time.monotonic() < end:
-                time.sleep(0.05)
+
+            # 等待首个匹配 session 的 /charge/error_info, 或 action 结果, 或兜底超时
+            end = time.monotonic() + DOCKING2_RESULT_TIMEOUT
+            while time.monotonic() < end:
+                if self.charge_error_event.wait(0.1):
+                    break
+                if self.charge_get_future_result.done():
+                    break
+
+            if self.charge_error is not None:
+                err = self.charge_error
+                self.charge_session = ''
+                code, message = self._charge_error_response(err.code, err.message)
+                self.get_logger().info(
+                    f'/charger/start_docking2: return early from /charge/error_info, code={code}, message={message}')
+                # 底层流程仍在执行, is_docking 保持 True, 由上层下发 /charger/stop_docking 结束本次回充
+                response.code = code
+                response.message = message
+                return response
+
             if not self.charge_get_future_result.done():
                 self.get_logger().info('/charger/start_docking2: charge action result timeout')
-                self.charger_state.is_docking = False
-                response.code = 13
+                self.charge_session = ''
+                response.code = ChargeErrorCode.TIMEOUT_RESPONSE
                 response.message = 'timeout response'
+                # 底层流程可能仍在执行, is_docking 保持 True, 由上层下发 /charger/stop_docking 结束本次回充
                 return response
 
             dock_result = self.charge_get_future_result.result().result
+            self.charge_session = ''
+            # action 已结束, 回充流程终止
             self.charger_state.is_docking = False
             self.get_logger().info('=== Charge action ===     result => success: {}, code: {}'.format(dock_result.success, dock_result.code))
             response.code = dock_result.code
@@ -375,8 +529,11 @@ class chargeManager(Node):
             return response
         except Exception as e:
             self.get_logger().info(f'/charger/start_docking2: exception {e}')
-            self.charger_state.is_docking = False
-            response.code = 40
+            self.charge_session = ''
+            if not goal_accepted:
+                # goal 未 accepted, 底层没有流程在跑
+                self.charger_state.is_docking = False
+            response.code = ChargeErrorCode.UNKNOWN
             response.message = f'unknown error: {e}'
             return response
 

@@ -3,3 +3,9 @@ string mac
 bool success
 float64 connection_time
 string result
+# 错误码, 见 ChargeErrorCode.msg:
+#   0  success
+#   2  blocked(有其它蓝牙操作正在进行, 需重试)
+#   30 bluetooth not found(扫描未发现对端设备且连接失败)
+#   31 bluetooth connect error(已发现对端设备但连接失败/连接超时)
+uint16 code

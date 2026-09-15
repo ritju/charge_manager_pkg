@@ -7,6 +7,7 @@ import crcmod.predefined
 from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth, ChargeCommand
 from charge_manager_msgs.msg import ChargeState2
 from charge_manager_msgs.msg import BluetoothCommand
+from capella_ros_dock_msgs.msg import ChargeErrorCode
 from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolicy
 import asyncio
 from bleak import BleakClient, BleakScanner
@@ -442,7 +443,7 @@ class BluetoothChargeServer(Node):
                     response.success = True; response.code = 0; response.message = 'success'
                     return response
                 if not self.use_bluetooth_protocol_new:
-                    response.success = False; response.code = 40; response.message = 'old protocol not supported'
+                    response.success = False; response.code = ChargeErrorCode.INVALID_PROTOCOL; response.message = 'invalid protocol: old protocol not supported'
                     return response
                 send_d = self.send_heartbeat_data.copy()
                 send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
@@ -463,7 +464,7 @@ class BluetoothChargeServer(Node):
                     response.success = True; response.code = 0; response.message = 'success'
                     return response
                 if not self.use_bluetooth_protocol_new:
-                    response.success = False; response.code = 40; response.message = 'old protocol not supported'
+                    response.success = False; response.code = ChargeErrorCode.INVALID_PROTOCOL; response.message = 'invalid protocol: old protocol not supported'
                     return response
                 send_d = self.send_heartbeat_data.copy()
                 send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '03'; send_d[11] = '00'
@@ -515,6 +516,7 @@ class BluetoothChargeServer(Node):
             response.result = "Another operation in progress"
             self.get_logger().info("When connecting to Bluetooth, another operation is in progress")
             response.connection_time = 0.0
+            response.code = ChargeErrorCode.BLOCKED
             return response
 
         try:
@@ -523,6 +525,7 @@ class BluetoothChargeServer(Node):
                 response.success = True
                 response.connection_time = 0.0
                 response.result = f"Already connected to {request.mac}"
+                response.code = ChargeErrorCode.SUCCESS
                 self.get_logger().info(f"Already connected to {request.mac}")
                 return response
 
@@ -599,6 +602,8 @@ class BluetoothChargeServer(Node):
                 self.charge_state.switch_stu = ""
             self.bluetooth_connected = None
             self.disconnect_bluetooth = False
+            # 本次尝试的扫描结果, 用于区分"对端设备不存在(30)"与"连接失败(31)"
+            self.bluetooth_found = False
 
             future = asyncio.run_coroutine_threadsafe(
                 self.create_bleakclient(request.mac),
@@ -631,6 +636,7 @@ class BluetoothChargeServer(Node):
                 response.success = True
                 response.connection_time = round(time.time() - self.connect_start_time, 1)
                 response.result = f"蓝牙连接成功 {self.connect_exception}"
+                response.code = ChargeErrorCode.SUCCESS
                 self.data_received_time = time.time()
                 self._write_restore_file('0')
             else:
@@ -638,6 +644,9 @@ class BluetoothChargeServer(Node):
                 response.success = False
                 response.connection_time = round(time.time() - self.connect_start_time, 1)
                 response.result = f"蓝牙连接失败  {self.connect_exception}"
+                # 扫描未发现对端设备 -> 蓝牙设备不存在; 已发现对端设备但连不上/连接超时 -> 蓝牙连接失败
+                response.code = (ChargeErrorCode.BLUETOOTH_CONNECT_ERROR if self.bluetooth_found
+                                 else ChargeErrorCode.BLUETOOTH_NOT_FOUND)
                 self._write_restore_file('1')
             return response
         finally:
