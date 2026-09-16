@@ -55,6 +55,9 @@ CHARGE_ERROR_MESSAGES = {
 DOCKING2_RESULT_TIMEOUT = 480.0
 # mac 格式: XX:XX:XX:XX:XX:XX
 MAC_PATTERN = re.compile(r'([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
+# marker 格式: 对应 apriltag_ros 的 marker_id_and_bluetooth_mac_vec 配置项 "<id>[:<id_correction>]/<mac>",
+# 即单个 id("0") 或双 marker 的 id:id_correction("0:1")
+MARKER_PATTERN = re.compile(r'\d+(:\d+)?')
 
 class chargeManager(Node):
     
@@ -305,17 +308,16 @@ class chargeManager(Node):
     def _validate_dock_start_request(request):
         """校验 /charger/start_docking2 入参, 返回非法参数名, 全部合法返回空串。
 
-        marker 允许空串(dock 侧会回退为按 mac 查 marker_and_mac_vector), 非空时必须可转整数,
-        否则 dock 会静默回退; mac 必须为 XX:XX:XX:XX:XX:XX 格式, 否则 dock 侧无法定位 marker。
+        marker 允许空串(dock 侧会回退为按 mac 查 marker_and_mac_vector), 非空时必须是
+        "id" 或 "id:id_correction" 形式(如 "0" / "0:1", 对应 apriltag_ros 的配置项
+        "<id>[:<id_correction>]/<mac>"); mac 必须为 XX:XX:XX:XX:XX:XX 格式,
+        否则 dock 侧无法定位 marker。
         """
         if not MAC_PATTERN.fullmatch(request.mac or ''):
             return 'mac'
         marker = request.marker or ''
-        if marker:
-            try:
-                int(marker)
-            except ValueError:
-                return 'marker'
+        if marker and not MARKER_PATTERN.fullmatch(marker):
+            return 'marker'
         delta_values = (
             request.delta.position.x, request.delta.position.y, request.delta.position.z,
             request.delta.orientation.x, request.delta.orientation.y,
@@ -547,9 +549,9 @@ class chargeManager(Node):
                 f.write('0\n')
         except Exception as e:
             self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/core_restart.txt for processing /charger/start_docking service.")
-        if self.charge_action_client_sendgoal_future != None and isinstance(self.charge_action_client_sendgoal_future, Future):
+        if self.charge_action_client_sendgoal_future != None and self.charge_action_client_sendgoal_future.done():
             self.charge_goal_handle = self.charge_action_client_sendgoal_future.result()
-            cancel_goal_future = self.charge_goal_handle.cancel_goal_async()
+            self.charge_goal_handle.cancel_goal_async()
             self.get_logger().info("Charge action canceled! ")
         else:
             self.get_logger().info('charge action had completed or not executing.')

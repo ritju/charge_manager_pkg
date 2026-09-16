@@ -601,6 +601,7 @@ class ChargeAction(Node):
                 return result
 
             if self.dock_completed:
+                self.msg_state_pub.data = False
                 if not self.bluetooth_state_stored:
                     self.bluetooth_state_stored = True
                     try:
@@ -654,7 +655,6 @@ class ChargeAction(Node):
                             f.write(self.mac)
                     except Exception as e:
                         self.get_logger().info(f'存储充电状态 0 catch exception: {str(e)}')
-                    self.msg_state_pub.data = False
                     return result
                 else:                    
                     now_time = time.time()
