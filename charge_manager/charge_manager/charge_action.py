@@ -22,6 +22,7 @@ from capella_ros_msg.msg import Battery
 from capella_ros_service_interfaces.msg import ChargeState, RgbCameraResolution
 from std_srvs.srv import Empty as EmptyForSrv
 from std_msgs.msg import Bool
+from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 from capella_ros_msg.msg import Velocities
 from capella_ros_msg.srv import TurnoffPcPower
@@ -166,9 +167,43 @@ class ChargeAction(Node):
         self.last_power_off_on_time = 0.0
         self.get_logger().info(f"power_off_on_interval: {self.power_off_on_interval}")
     
+        # 相机数据检查参数(可配置): 切换 HIGH 分辨率前需确认相机有数据, 否则上报 20 camera not ready
+        env_camera_topic = os.environ.get('CHARGE_ACTION_CAMERA_IMAGE_TOPIC', '/rgb_camera_back/image_raw')
+        self.declare_parameter("camera_image_topic", env_camera_topic)
+        self.camera_image_topic = self.get_parameter("camera_image_topic").get_parameter_value().string_value
+        env_camera_timeout = os.environ.get('CHARGE_ACTION_CAMERA_DATA_TIMEOUT', '5.0')
+        self.declare_parameter("camera_data_timeout", float(env_camera_timeout))
+        self.camera_data_timeout = self.get_parameter("camera_data_timeout").get_parameter_value().double_value
+        env_camera_check = os.environ.get('CHARGE_ACTION_ENABLE_CAMERA_CHECK', 'true')
+        self.declare_parameter("enable_camera_check", env_camera_check.lower() == 'true')
+        self.enable_camera_check = self.get_parameter("enable_camera_check").get_parameter_value().bool_value
+        self.get_logger().info(
+            f'camera check: enable={self.enable_camera_check}, topic={self.camera_image_topic}, '
+            f'data_timeout={self.camera_data_timeout}s')
+        self.camera_last_data_time = 0.0
+        camera_image_qos = QoSProfile(depth=1)
+        camera_image_qos.reliability = ReliabilityPolicy.BEST_EFFORT
+        camera_image_qos.history = HistoryPolicy.KEEP_LAST
+        camera_image_qos.durability = DurabilityPolicy.VOLATILE
+        self.camera_image_sub_ = self.create_subscription(
+            Image, self.camera_image_topic, self.camera_image_sub_callback, camera_image_qos,
+            callback_group=self.cb_group)
+    
         # 尝试从文件读取上次断电时间
         self.load_last_power_off_time()
         
+    def camera_image_sub_callback(self, msg):
+        """只记录最新一帧的时间, 用于判断相机是否有数据。"""
+        self.camera_last_data_time = time.time()
+
+    def camera_has_data(self):
+        """相机在 camera_data_timeout 秒内是否发布过图像。"""
+        if not self.enable_camera_check:
+            return True
+        if self.camera_last_data_time <= 0.0:
+            return False
+        return (time.time() - self.camera_last_data_time) <= self.camera_data_timeout
+
     def load_last_power_off_time(self):
         """从文件加载上次断电重启的时间，如果文件不存在则创建并写入0"""
         try:
@@ -295,7 +330,9 @@ class ChargeAction(Node):
     def publish_charge_error(self, code, message):
         """发布本次流程的首个不可重试错误码(每个流程最多一条, 同时作为 action result 的 code)。"""
         if self.charge_error_code != ChargeErrorCode.SUCCESS:
-            self.get_logger().info(f'charge error already reported(code={self.charge_error_code}), ignore code={code}')
+            self.get_logger().info(
+                f'charge error already reported(code={self.charge_error_code}), ignore code={code}',
+                throttle_duration_sec=5.0)
             return
         self.charge_error_code = code
         msg = ChargeErrorInfo()
@@ -377,12 +414,22 @@ class ChargeAction(Node):
         
         # switch resolution to 1280x1024
         if not self.resolution_high and not self.dock_completed and not self.stop_loop and not self.switch_resolution_executing:
-            self.get_logger().info('-------- call /rgb_camera_manager_server/switch_resolution service with resolution:1280x1024 --------')
-            self.switch_resolution_executing = True
-            request = SwitchResolution.Request()
-            request.resolution_mode = SwitchResolution.Request.RESOLUTION_HIGH
-            self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
-            self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
+            if not self.camera_has_data():
+                # 相机无数据: 不切换分辨率, 上报 20 camera not ready(只上报一次, 停止由上层 stop 触发)
+                self.get_logger().info(
+                    f'camera not ready: no data on {self.camera_image_topic} within '
+                    f'{self.camera_data_timeout}s, skip switch_resolution',
+                    throttle_duration_sec=5.0)
+                self.publish_charge_error(
+                    ChargeErrorCode.CAMERA_NOT_READY,
+                    f'camera not ready: no data on {self.camera_image_topic} within {self.camera_data_timeout}s')
+            else:
+                self.get_logger().info('-------- call /rgb_camera_manager_server/switch_resolution service with resolution:1280x1024 --------')
+                self.switch_resolution_executing = True
+                request = SwitchResolution.Request()
+                request.resolution_mode = SwitchResolution.Request.RESOLUTION_HIGH
+                self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
+                self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
         
         if not self.apriltag_detecting and not self.stop_loop and not self.start_apriltag_detecting_executing:
             self.get_logger().info('-------- call /start_detect_apriltag service --------')

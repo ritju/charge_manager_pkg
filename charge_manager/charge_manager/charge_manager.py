@@ -131,6 +131,15 @@ class chargeManager(Node):
         # 初始化 zero_cmd_vel_publisher
         # self.zero_cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 1, callback_group=callback_group_type)
         
+        # 新旧接口开关(可配置): false 时只创建旧接口(start/stop/water/start_docking/stop_docking),
+        # 不创建新接口 /charger/start2 与 /charger/start_docking2
+        env_new_services = os.environ.get('CHARGE_MANAGER_ENABLE_NEW_SERVICES', 'true')
+        self.declare_parameter("enable_new_services", env_new_services.strip().lower() in ('true', 'yes', 'on', '1'))
+        self.enable_new_services = self.get_parameter("enable_new_services").get_parameter_value().bool_value
+        self.get_logger().info(
+            f'enable_new_services: {self.enable_new_services} '
+            f'({"new + old interfaces" if self.enable_new_services else "old interfaces only"})')
+
         # /charger/start service
         self.charger_start_service = self.create_service(Empty, '/charger/start', self.charger_start_service_callback, callback_group=callback_group_type)
         
@@ -149,11 +158,16 @@ class chargeManager(Node):
         # /charger/stop_docking
         self.charger_stop_docking_service = self.create_service(Empty, '/charger/stop_docking', self.charger_stop_docking_service_callback, callback_group=callback_group_type)
 
-        # /charger/start2 service
-        self.charger_start2_service = self.create_service(ChargeStart, '/charger/start2', self.charger_start2_service_callback, callback_group=callback_group_type)
-
-        # /charger/start_docking2 service
-        self.charger_start_docking2_service = self.create_service(DockStart, '/charger/start_docking2', self.charger_start_docking2_service_callback, callback_group=single_cb_group)
+        # /charger/start2 service (新接口, 受 enable_new_services 控制)
+        self.charger_start2_service = None
+        # /charger/start_docking2 service (新接口, 受 enable_new_services 控制)
+        self.charger_start_docking2_service = None
+        if self.enable_new_services:
+            self.charger_start2_service = self.create_service(ChargeStart, '/charger/start2', self.charger_start2_service_callback, callback_group=callback_group_type)
+            self.charger_start_docking2_service = self.create_service(DockStart, '/charger/start_docking2', self.charger_start_docking2_service_callback, callback_group=single_cb_group)
+        else:
+            self.get_logger().info(
+                'enable_new_services=False: /charger/start2 and /charger/start_docking2 are NOT created')
 
         self.charge_action_client = ActionClient(self, Charge, 'charge', callback_group=callback_group_type)
 
@@ -424,7 +438,9 @@ class chargeManager(Node):
 
     def charger_start_docking2_service_callback(self, request, response):
         self.get_logger().info('received a request for /charger/start_docking2 service')
-        self.get_logger().info(f'/charger/start_docking2: mac={request.mac}, marker={request.marker}, protocol={request.protocol}')
+        self.get_logger().info(
+            f'/charger/start_docking2: mac={request.mac}, marker={request.marker}, protocol={request.protocol}, '
+            f'delta=({request.delta.position.x}, {request.delta.position.y})')
         goal_accepted = False
         try:
             # pre-check: invalid params
