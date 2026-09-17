@@ -131,7 +131,10 @@ class BluetoothChargeServer(Node):
         start_time = time.time()
         self.get_logger().info('received a request for /disconnect_bluetooth')
 
-        if not self._connect_lock.acquire(blocking=False):
+        # 1. 设置标志，防止协程继续发送数据
+        self.disconnect_bluetooth = True
+        
+        if not self._connect_lock.acquire(blocking=True, timeout=60):
             response.success = False
             response.infos = "Another operation in progress"
             response.cost_time = round(time.time() - start_time, 1)
@@ -139,8 +142,6 @@ class BluetoothChargeServer(Node):
             return response
         
         try:
-            # 1. 设置标志，防止协程继续发送数据
-            self.disconnect_bluetooth = True
             
             # 2. 主动断开正在运行的 BLE 任务
             with self._client_lock:
@@ -271,7 +272,7 @@ class BluetoothChargeServer(Node):
                 response.success = True; response.code = 0; response.message = 'success'
                 return response
             elif time.time() - t1 > 10:
-                self.get_logger().info(f"Wait for {cmd} timeout", cmd);
+                self.get_logger().info(f"Wait for {cmd} timeout")
                 response.success = False; response.code = 13; response.message = 'timeout response'
                 return response
             else: time.sleep(1)
@@ -332,7 +333,7 @@ class BluetoothChargeServer(Node):
                     send_d.append('00')
 
                 # Wait for confirmation with timeout
-                self._wait_and_check(send_d, lambda cur_state: cur_state.is_charging
+                return self._wait_and_check(send_d, lambda cur_state: cur_state.is_charging
                                      , response, "CHARGER_START")
 
             elif request.command == BluetoothCommand.CHARGER_STOP:
@@ -375,7 +376,7 @@ class BluetoothChargeServer(Node):
                     send_d.append('01')  # 关闭充电
                     send_d.append('00')
 
-                self._wait_and_check(send_d, lambda cur_state: not cur_state.is_charging
+                return self._wait_and_check(send_d, lambda cur_state: not cur_state.is_charging
                     , response, "CHARGER_STOP")
 
             elif request.command == BluetoothCommand.WATER_START:
@@ -404,7 +405,7 @@ class BluetoothChargeServer(Node):
                     send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '02'; send_d[11] = '00'
                     send_d.append('00'); send_d.append('01')
 
-                self._wait_and_check(send_d, lambda cur_state: cur_state.is_waterflooding
+                return self._wait_and_check(send_d, lambda cur_state: cur_state.is_waterflooding
                     , response, "WATER_START")
 
             elif request.command == BluetoothCommand.WATER_STOP:
@@ -426,7 +427,7 @@ class BluetoothChargeServer(Node):
                     send_d[8] = '80'; send_d[9] = '00'; send_d[10] = '02'; send_d[11] = '00'
                     send_d.append('00'); send_d.append('02')
 
-                self._wait_and_check(send_d, lambda cur_state: not cur_state.is_waterflooding
+                return self._wait_and_check(send_d, lambda cur_state: not cur_state.is_waterflooding
                     , response, "WATER_STOP")
 
             elif request.command == BluetoothCommand.ENABLE_MANUAL_ADD_WATER:
@@ -451,7 +452,7 @@ class BluetoothChargeServer(Node):
                 send_d.append('01' if state_info.is_waterflooding else '00')
                 send_d.append('01')
 
-                self._wait_and_check(send_d, lambda cur_state: cur_state.manual_enable_stu
+                return self._wait_and_check(send_d, lambda cur_state: cur_state.manual_enable_stu
                     , response, "ENABLE_MANUAL_ADD_WATER")
                 
             elif request.command == BluetoothCommand.DISABLE_MANUAL_ADD_WATER:
@@ -471,7 +472,7 @@ class BluetoothChargeServer(Node):
                 send_d.append('01' if state_info.is_charging else '00')
                 send_d.append('01' if state_info.is_waterflooding else '00')
                 send_d.append('00')
-                self._wait_and_check(send_d, lambda cur_state: not cur_state.manual_enable_stu
+                return self._wait_and_check(send_d, lambda cur_state: not cur_state.manual_enable_stu
                     , response, "ENABLE_MANUAL_ADD_WATER")
 
             else:
@@ -743,7 +744,7 @@ class BluetoothChargeServer(Node):
                         self.send_data = None
 
                 current_time = time.time()
-                if current_time - self.heartbeat_time > 0.5:
+                if current_time > self.heartbeat_time:
                     send_d = self.send_heartbeat_data.copy()
                     send_d[8] = '80'
                     send_d[9] = '21'
@@ -754,10 +755,11 @@ class BluetoothChargeServer(Node):
                     send_d.append('16')
                     heart_bytes = bytes.fromhex(''.join(send_d))
                     await client.write_gatt_char(self.uuid_write, heart_bytes, response=False)
+                    self.get_logger().info('heart_beat sent', throttle_duration_sec=10)
                     self.udp_data = None
-                    self.heartbeat_time = current_time
+                    self.heartbeat_time = current_time + 0.01
 
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.2)
 
         except Exception as e:
             self.get_logger().info(f'BLE 连接/通信异常: {str(e)}')
@@ -822,6 +824,8 @@ class BluetoothChargeServer(Node):
                             self.charge_state.water_mode = "manual" if data_list[18] == '01' else "auto"
                 except IndexError:
                     pass
+                
+                self.heartbeat_time = time.time()
         else:
             self.get_logger().debug('CRC 校验失败')
 

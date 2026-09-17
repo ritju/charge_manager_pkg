@@ -469,7 +469,6 @@ class chargeManager(Node):
             charge_msg.session_id = self.charge_session
             self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
 
-            #self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
             # 节点已由 MultiThreadedExecutor 托管, 不能嵌套 spin, 否则节点会被移出主 executor
             end = time.monotonic() + 10.0
             while not self.charge_action_client_sendgoal_future.done() and time.monotonic() < end:
@@ -491,14 +490,14 @@ class chargeManager(Node):
                 return response
             self.get_logger().info('=== charge action ===     goal accepted.')
             goal_accepted = True
-            self.charge_get_future_result = goal_handle.get_result_async()
+            charge_get_future_result = goal_handle.get_result_async()
 
             # 等待首个匹配 session 的 /charge/error_info, 或 action 结果, 或兜底超时
             end = time.monotonic() + DOCKING2_RESULT_TIMEOUT
             while time.monotonic() < end:
                 if self.charge_error_event.wait(0.1):
                     break
-                if self.charge_get_future_result.done():
+                if charge_get_future_result.done():
                     break
 
             if self.charge_error is not None:
@@ -512,7 +511,7 @@ class chargeManager(Node):
                 response.message = message
                 return response
 
-            if not self.charge_get_future_result.done():
+            if not charge_get_future_result.done():
                 self.get_logger().info('/charger/start_docking2: charge action result timeout')
                 self.charge_session = ''
                 response.code = ChargeErrorCode.TIMEOUT_RESPONSE
@@ -520,7 +519,7 @@ class chargeManager(Node):
                 # 底层流程可能仍在执行, is_docking 保持 True, 由上层下发 /charger/stop_docking 结束本次回充
                 return response
 
-            dock_result = self.charge_get_future_result.result().result
+            dock_result = charge_get_future_result.result().result
             self.charge_session = ''
             # action 已结束, 回充流程终止
             self.charger_state.is_docking = False
@@ -550,8 +549,8 @@ class chargeManager(Node):
         except Exception as e:
             self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/core_restart.txt for processing /charger/start_docking service.")
         if self.charge_action_client_sendgoal_future != None and self.charge_action_client_sendgoal_future.done():
-            self.charge_goal_handle = self.charge_action_client_sendgoal_future.result()
-            self.charge_goal_handle.cancel_goal_async()
+            charge_goal_handle = self.charge_action_client_sendgoal_future.result()
+            charge_goal_handle.cancel_goal_async()
             self.get_logger().info("Charge action canceled! ")
         else:
             self.get_logger().info('charge action had completed or not executing.')
