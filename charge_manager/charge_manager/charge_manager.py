@@ -13,6 +13,7 @@ import os
 import re
 import math
 import threading
+import traceback
 
 from std_srvs.srv import Empty
 from std_msgs.msg import String
@@ -365,43 +366,58 @@ class chargeManager(Node):
             self.mac = msg.data
     
     def charger_start_service_callback(self, request, response):
-        self.get_logger().info('received a request for /charger/start service')
-        self._call_charge_command(BluetoothCommand.CHARGER_START)
+        try:
+            self.get_logger().info('received a request for /charger/start service')
+            self._call_charge_command(BluetoothCommand.CHARGER_START)
+        except Exception:
+            self.get_logger().error(f'charger_start_service_callback exception:\n{traceback.format_exc()}')
         return response
 
     def charger_stop_service_callback(self, request, response):
-        self.get_logger().info('received a request for /charger/stop service')
-        self._call_charge_command(BluetoothCommand.CHARGER_STOP)
+        try:
+            self.get_logger().info('received a request for /charger/stop service')
+            self._call_charge_command(BluetoothCommand.CHARGER_STOP)
+        except Exception:
+            self.get_logger().error(f'charger_stop_service_callback exception:\n{traceback.format_exc()}')
         return response
 
     def water_start_service_callback(self, request, response):
-        self.get_logger().info('received a request for /water/start service')
-        self._call_charge_command(BluetoothCommand.WATER_START)
+        try:
+            self.get_logger().info('received a request for /water/start service')
+            self._call_charge_command(BluetoothCommand.WATER_START)
+        except Exception:
+            self.get_logger().error(f'water_start_service_callback exception:\n{traceback.format_exc()}')
         return response
 
     def water_stop_service_callback(self, request, response):
-        self.get_logger().info('received a request for /water/stop service')
-        self._call_charge_command(BluetoothCommand.WATER_STOP)
+        try:
+            self.get_logger().info('received a request for /water/stop service')
+            self._call_charge_command(BluetoothCommand.WATER_STOP)
+        except Exception:
+            self.get_logger().error(f'water_stop_service_callback exception:\n{traceback.format_exc()}')
         return response
 
     def charger_start_docking_service_callback(self, request, response):
-        self.get_logger().info('received a request for /charger/start_docking service')
-        self.get_logger().info("start charge action")
-        self.get_logger().info(f"write 1 to /map/core_restart.txt for /charger/start_docking")
         try:
-            with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
-                f.write('1\n')
-                # f.write('self.mac')
-        except Exception as e:
-            self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charger/start_docking service.")
-        self.charger_state.is_docking = True
-        charge_msg = Charge.Goal()
-        charge_msg.mac = self.mac
-        # charge_msg.mac = '94:C9:60:43:BD:FD'
-        while not self.charge_action_client.wait_for_server(2):
-            self.get_logger().info('Charge action server not available.')
-        self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
-        self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
+            self.get_logger().info('received a request for /charger/start_docking service')
+            self.get_logger().info("start charge action")
+            self.get_logger().info(f"write 1 to /map/core_restart.txt for /charger/start_docking")
+            try:
+                with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                    f.write('1\n')
+                    # f.write('self.mac')
+            except Exception as e:
+                self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charger/start_docking service.")
+            self.charger_state.is_docking = True
+            charge_msg = Charge.Goal()
+            charge_msg.mac = self.mac
+            # charge_msg.mac = '94:C9:60:43:BD:FD'
+            while not self.charge_action_client.wait_for_server(2):
+                self.get_logger().info('Charge action server not available.')
+            self.charge_action_client_sendgoal_future = self.charge_action_client.send_goal_async(charge_msg, self.charge_action_feedback_callback)
+            self.charge_action_client_sendgoal_future.add_done_callback(self.charge_action_response_callback)
+        except Exception:
+            self.get_logger().error(f'charger_start_docking_service_callback exception:\n{traceback.format_exc()}')
         return response
     
     def charger_start2_service_callback(self, request, response):
@@ -555,39 +571,51 @@ class chargeManager(Node):
             return response
 
     def charger_stop_docking_service_callback(self, request, response):
-        self.charger_state.is_docking = False
-        self.get_logger().info('received a request for /charger/stop_docking service')
-        self.get_logger().info("stop charge action")
-        self.get_logger().info(f"write 0 to /map/core_restart.txt for /charger/stop_docking")
         try:
-            with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
-                f.write('0\n')
-        except Exception as e:
-            self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/core_restart.txt for processing /charger/start_docking service.")
-        if self.charge_action_client_sendgoal_future != None and self.charge_action_client_sendgoal_future.done():
-            charge_goal_handle = self.charge_action_client_sendgoal_future.result()
-            charge_goal_handle.cancel_goal_async()
-            self.get_logger().info("Charge action canceled! ")
-        else:
-            self.get_logger().info('charge action had completed or not executing.')
+            self.charger_state.is_docking = False
+            self.get_logger().info('received a request for /charger/stop_docking service')
+            self.get_logger().info("stop charge action")
+            self.get_logger().info(f"write 0 to /map/core_restart.txt for /charger/stop_docking")
+            try:
+                with open('/map/core_restart.txt', 'w', encoding='utf-8') as f:
+                    f.write('0\n')
+            except Exception as e:
+                self.get_logger().info(f"catch exception {str(e)} when write 0 to /map/core_restart.txt for processing /charger/start_docking service.")
+            if self.charge_action_client_sendgoal_future != None and self.charge_action_client_sendgoal_future.done():
+                charge_goal_handle = self.charge_action_client_sendgoal_future.result()
+                charge_goal_handle.cancel_goal_async()
+                self.get_logger().info("Charge action canceled! ")
+            else:
+                self.get_logger().info('charge action had completed or not executing.')
+        except Exception:
+            self.get_logger().error(f'charger_stop_docking_service_callback exception:\n{traceback.format_exc()}')
         return response
 
     def charge_action_feedback_callback(self, feedback_msg):
-        self.get_logger().info(f"=== charge action Feedback ===     {feedback_msg.feedback.state}", throttle_duration_sec=10)
+        try:
+            self.get_logger().info(f"=== charge action Feedback ===     {feedback_msg.feedback.state}", throttle_duration_sec=10)
+        except Exception:
+            self.get_logger().error(f'charge_action_feedback_callback exception:\n{traceback.format_exc()}')
 
     def charge_action_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().info('=== charge action ===     goal rejected !')
-        else:
-            self.get_logger().info('=== charge action ===     goal accepted.')
-            self.charge_get_future_result = goal_handle.get_result_async()
-            self.charge_get_future_result.add_done_callback(self.charge_get_result_callback)
+        try:
+            goal_handle = future.result()
+            if not goal_handle.accepted:
+                self.get_logger().info('=== charge action ===     goal rejected !')
+            else:
+                self.get_logger().info('=== charge action ===     goal accepted.')
+                self.charge_get_future_result = goal_handle.get_result_async()
+                self.charge_get_future_result.add_done_callback(self.charge_get_result_callback)
+        except Exception:
+            self.get_logger().error(f'charge_action_response_callback exception:\n{traceback.format_exc()}')
 
     def charge_get_result_callback(self, future):
-        result = future.result().result
-        self.charger_state.is_docking = False
-        self.get_logger().info('=== Charge action ===     result => success: {}'.format(result.success))
+        try:
+            result = future.result().result
+            self.charger_state.is_docking = False
+            self.get_logger().info('=== Charge action ===     result => success: {}'.format(result.success))
+        except Exception:
+            self.get_logger().error(f'charge_get_result_callback exception:\n{traceback.format_exc()}')
     
     def terminate(self, proc: subprocess.Popen):
         parent_pid = proc.pid 
@@ -621,10 +649,18 @@ class chargeManager(Node):
 def main(args=None):
     rclpy.init(args=args)
     charger_manager_node = chargeManager()
-    multi_executor = MultiThreadedExecutor()
-    multi_executor.add_node(charger_manager_node)
-    multi_executor.spin()
-    rclpy.shutdown()
+    multi_executor = None
+    try:
+        multi_executor = MultiThreadedExecutor()
+        multi_executor.add_node(charger_manager_node)
+        multi_executor.spin()
+    except Exception:
+        charger_manager_node.get_logger().error(
+            f'charge_manager main exception:\n{traceback.format_exc()}')
+    finally:
+        # SIGINT 时 rclpy 已触发 shutdown, 这里用 rclpy.ok() 避免重复关闭抛 RCLError
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()  

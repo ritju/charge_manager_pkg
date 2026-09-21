@@ -12,6 +12,7 @@ from rclpy.qos import DurabilityPolicy,ReliabilityPolicy,QoSProfile,HistoryPolic
 import time
 import threading
 import signal
+import traceback
 
 from charge_manager_msgs.srv import ConnectBluetooth, DisconnectBluetooth, StartBluetooth, StopBluetooth
 from charge_manager_msgs.action import Charge
@@ -133,11 +134,11 @@ class ChargeAction(Node):
         
         # 创建 charge action 服务端
         self.charge_action_server_ = ActionServer(self, Charge, 'charge', 
-                                                  execute_callback=self.charge_action_execute_callback, 
+                                                  execute_callback=self._execute_guarded, 
                                                   callback_group= self.cb_group,
                                                   goal_callback=self.charge_action_goal_callback,
                                                   handle_accepted_callback=self.charge_action_handle_accepted_callback,
-                                                  cancel_callback=self.charge_action_cancel_callback,
+                                                  cancel_callback=self._cancel_guarded,
                                                   result_timeout=3600000
                                                   )
 
@@ -511,6 +512,13 @@ class ChargeAction(Node):
         self.goal_handle.publish_feedback(self.feedback_msg)
 
     def power_off_on_done_callback(self, future):
+        exc = future.exception()
+        if exc is not None:
+            self.get_logger().error(
+                f'power_off_on_done_callback exception:\n'
+                f"{''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}")
+            self.power_off_on_executing = False
+            return
         response = future.result()
         if response.response_stu == True:
             self.get_logger().info('/off_pc_power success, pc will power off after 150s.')
@@ -529,6 +537,13 @@ class ChargeAction(Node):
             self.power_off_on_executing = False
     
     def start_apriltag_detect_future_done_callback(self, future):
+        exc = future.exception()
+        if exc is not None:
+            self.get_logger().error(
+                f'start_apriltag_detect_future_done_callback exception:\n'
+                f"{''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}")
+            self.start_apriltag_detecting_executing = False
+            return
         response = future.result()
         if response.success:
             self.get_logger().info('start_detect_apriltag service result: success.')
@@ -539,6 +554,13 @@ class ChargeAction(Node):
         self.start_apriltag_detecting_executing = False
     
     def stop_apriltag_detect_future_done_callback(self, future):
+        exc = future.exception()
+        if exc is not None:
+            self.get_logger().error(
+                f'stop_apriltag_detect_future_done_callback exception:\n'
+                f"{''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}")
+            self.stop_apriltag_detecting_executing = False
+            return
         response = future.result()
         if response.success:
             self.get_logger().info('stop_detect_apriltag service result: success.')
@@ -564,30 +586,34 @@ class ChargeAction(Node):
 
     # charge_action goal_callback
     def charge_action_goal_callback(self, goal_request):
-        if goal_request.restore == 1:
-            self.charge_type = 'restore'
-        else:
-            if goal_request.type == 0:
-                self.charge_type = 'auto'
-            elif goal_request.type == 1:
-                self.charge_type = 'manual'
+        try:
+            if goal_request.restore == 1:
+                self.charge_type = 'restore'
+            else:
+                if goal_request.type == 0:
+                    self.charge_type = 'auto'
+                elif goal_request.type == 1:
+                    self.charge_type = 'manual'
 
-        self.get_logger().info(f'Received a new /Charge action request, type: {self.charge_type}')
-        if self.msg_state_pub.data:
-            self.get_logger().info('The /charge action server is executing Charge action. Reject')
+            self.get_logger().info(f'Received a new /Charge action request, type: {self.charge_type}')
+            if self.msg_state_pub.data:
+                self.get_logger().info('The /charge action server is executing Charge action. Reject')
+                return GoalResponse.REJECT
+            else:
+                self.mac = goal_request.mac
+                self.request_marker = goal_request.marker
+                self.request_protocol = goal_request.protocol
+                self.request_delta = goal_request.delta
+                self.session_id = goal_request.session_id
+                self.get_logger().info('charge_action_goal_callback')
+                self.get_logger().info(f'self.mac: {self.mac}')
+                self.get_logger().info(f'marker: {self.request_marker}, protocol: {self.request_protocol}')
+                self.msg_state_pub.data = True
+                self.get_logger().info('The /charge action server is idle, accepted and executing.')
+                return GoalResponse.ACCEPT
+        except Exception:
+            self.get_logger().error(f'charge_action_goal_callback exception:\n{traceback.format_exc()}')
             return GoalResponse.REJECT
-        else:
-            self.mac = goal_request.mac
-            self.request_marker = goal_request.marker
-            self.request_protocol = goal_request.protocol
-            self.request_delta = goal_request.delta
-            self.session_id = goal_request.session_id
-            self.get_logger().info('charge_action_goal_callback')
-            self.get_logger().info(f'self.mac: {self.mac}')
-            self.get_logger().info(f'marker: {self.request_marker}, protocol: {self.request_protocol}')
-            self.msg_state_pub.data = True
-            self.get_logger().info('The /charge action server is idle, accepted and executing.')
-            return GoalResponse.ACCEPT
 
     # charge_action handle_accepted_callback
     def charge_action_handle_accepted_callback(self, goal_handle):
@@ -595,6 +621,22 @@ class ChargeAction(Node):
         self.goal_handle = goal_handle
         goal_handle.execute()
     
+    def _execute_guarded(self, goal_handle):
+        """execute_callback 的守护包装: 异常打印 traceback 并以 code=40 终止, 避免崩溃。"""
+        try:
+            return self.charge_action_execute_callback(goal_handle)
+        except Exception:
+            self.get_logger().error(
+                f'charge_action_execute_callback exception:\n{traceback.format_exc()}')
+            result = Charge.Result()
+            result.success = False
+            result.code = ChargeErrorCode.UNKNOWN
+            try:
+                goal_handle.abort(result)
+            except Exception:
+                self.get_logger().error(f'_execute_guarded exception:\n{traceback.format_exc()}')
+            return result
+
     # charge_action 服务端 execute_callback
     def charge_action_execute_callback(self, goal_handle):
         self.get_logger().info("charge_action_execute_callback.")
@@ -625,7 +667,7 @@ class ChargeAction(Node):
             except Exception as e:
                 self.get_logger().info(f"catch exception {str(e)} when write 1 to /map/core_restart.txt for processing /charge action started.")
         
-        self.loop_thread = threading.Thread(target=self.loop_,daemon=True)
+        self.loop_thread = threading.Thread(target=self._safe_loop, daemon=True)
         self.loop_thread.start()
 
         while True:
@@ -715,6 +757,14 @@ class ChargeAction(Node):
                 self.is_docking_state_pub.publish(self.msg_state_pub)
                 time.sleep(1)
             
+    def _safe_loop(self):
+        """loop_ 线程的兜底: 异常打印 traceback 并停止流程, 避免线程静默死亡。"""
+        try:
+            self.loop_()
+        except Exception:
+            self.get_logger().info(f'loop_ 异常: {traceback.format_exc()}')
+            self.stop_loop = True
+
     def loop_(self):
         self.get_logger().info('loop started')
         while True:
@@ -749,6 +799,15 @@ class ChargeAction(Node):
             time.sleep(1)
 
     
+    def _cancel_guarded(self, goal_handle):
+        """cancel_callback 的守护包装: 异常打印 traceback 并拒绝取消, 避免崩溃。"""
+        try:
+            return self.charge_action_cancel_callback(goal_handle)
+        except Exception:
+            self.get_logger().error(
+                f'charge_action_cancel_callback exception:\n{traceback.format_exc()}')
+            return CancelResponse.REJECT
+
     # charge_action cancel callback
     def charge_action_cancel_callback(self, goal_handle):
         self.get_logger().info("Received request to cancel charge action servo goal")
@@ -782,6 +841,13 @@ class ChargeAction(Node):
         return CancelResponse.ACCEPT
 
     def connect_bluetooth_done_callback(self, future_connect_bluetooth):
+        exc = future_connect_bluetooth.exception()
+        if exc is not None:
+            self.get_logger().error(
+                f'connect_bluetooth_done_callback exception:\n'
+                f"{''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}")
+            self.connect_bluetooth_executing = False
+            return
         response = future_connect_bluetooth.result()
         self.get_logger().info(
             f'bluetooth connection {"True" if response.success else "False"}, '
@@ -800,6 +866,12 @@ class ChargeAction(Node):
         self.connect_bluetooth_executing = False
     
     def disconnect_bluetooth_callback(self, future):
+        exc = future.exception()
+        if exc is not None:
+            self.get_logger().error(
+                f'disconnect_bluetooth_callback exception:\n'
+                f"{''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}")
+            return
         response = future.result()        
         self.get_logger().info(f'/disconnect_bluetooth service: {"success" if response.success else "Failed" }, cost time: {response.cost_time}, seconds, infos: {response.infos}"')
 
@@ -813,6 +885,12 @@ class ChargeAction(Node):
         self.get_logger().info('*************************************************')
 
     def dock_response_callback(self, future):
+        exc = future.exception()
+        if exc is not None:
+            self.get_logger().error(
+                f'dock_response_callback exception:\n'
+                f"{''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}")
+            return
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().info('dock goal rejected !')
@@ -823,6 +901,12 @@ class ChargeAction(Node):
             self._dock_get_future_result.add_done_callback(self.dock_get_result_callback)
 
     def dock_get_result_callback(self, future):
+        exc = future.exception()
+        if exc is not None:
+            self.get_logger().error(
+                f'dock_get_result_callback exception:\n'
+                f"{''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}")
+            return
         result = future.result().result
         self.dock_result_code = result.code
         self.get_logger().info('Dock result => is_docked: {}, code: {}'.format(result.is_docked, result.code))
@@ -848,10 +932,17 @@ class ChargeAction(Node):
 def main(args=None):
     rclpy.init(args=args)
     charge_action_node = ChargeAction()
-    multi_executor = MultiThreadedExecutor()
-    multi_executor.add_node(charge_action_node)
-    multi_executor.spin()
-    multi_executor.shutdown()
+    multi_executor = None
+    try:
+        multi_executor = MultiThreadedExecutor()
+        multi_executor.add_node(charge_action_node)
+        multi_executor.spin()
+    except Exception:
+        charge_action_node.get_logger().error(
+            f'charge_action main exception:\n{traceback.format_exc()}')
+    finally:
+        if multi_executor is not None:
+            multi_executor.shutdown()
 
 if __name__ == '__main__':
     main()  

@@ -18,6 +18,7 @@ from signal import SIGINT, SIGTERM
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 import fcntl
+import traceback
 
 import re
 
@@ -115,13 +116,27 @@ class BluetoothChargeServer(Node):
 
         # 单一事件循环
         self.loop = asyncio.new_event_loop()
-        self.loop_thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        self.loop_thread = threading.Thread(target=self._safe_run_event_loop, daemon=True)
         self.loop_thread.start()
 
-        self.charge_state_publish_thread = threading.Thread(target=self.charge_state_pub, daemon=True)
+        self.charge_state_publish_thread = threading.Thread(target=self._safe_charge_state_pub, daemon=True)
         self.charge_state_publish_thread.start()
 
         self.get_logger().info("Bluetooth charge Server starting")
+
+    def _safe_run_event_loop(self):
+        """事件循环线程的兜底: 异常打印 traceback, 避免线程静默死亡。"""
+        try:
+            self._run_event_loop()
+        except Exception:
+            self.get_logger().info(f'_run_event_loop 异常: {traceback.format_exc()}')
+
+    def _safe_charge_state_pub(self):
+        """状态发布线程的兜底: 异常打印 traceback, 避免线程静默死亡。"""
+        try:
+            self.charge_state_pub()
+        except Exception:
+            self.get_logger().info(f'charge_state_pub 异常: {traceback.format_exc()}')
 
     def _run_event_loop(self):
         asyncio.set_event_loop(self.loop)
@@ -171,6 +186,12 @@ class BluetoothChargeServer(Node):
             response.infos = '断开蓝牙连接成功。'
             response.cost_time = round(time.time() - start_time, 1)
             self.get_logger().info(f'断开蓝牙连接成功。耗时: {response.cost_time}s')
+            return response
+        except Exception:
+            self.get_logger().error(f'disconnect_bluetooth_callback exception:\n{traceback.format_exc()}')
+            response.success = False
+            response.infos = f'断开蓝牙异常: {traceback.format_exc()}'
+            response.cost_time = round(time.time() - start_time, 1)
             return response
         finally:
             self._connect_lock.release()
@@ -650,6 +671,14 @@ class BluetoothChargeServer(Node):
                                  else ChargeErrorCode.BLUETOOTH_NOT_FOUND)
                 self._write_restore_file('1')
             return response
+        except Exception:
+            self.get_logger().error(f'connect_bluetooth exception:\n{traceback.format_exc()}')
+            response.success = False
+            response.connection_time = round(time.time() - self.connect_start_time, 1) if getattr(self, 'connect_start_time', 0.0) else 0.0
+            response.result = f'蓝牙连接失败  {traceback.format_exc()}'
+            response.code = ChargeErrorCode.UNKNOWN
+            self._write_restore_file('1')
+            return response
         finally:
             self._connect_lock.release()
 
@@ -824,6 +853,8 @@ class BluetoothChargeServer(Node):
                             self.charge_state.water_mode = "manual" if data_list[18] == '01' else "auto"
                 except IndexError:
                     pass
+                except Exception as e:
+                    self.get_logger().info(f'更新状态失败: {traceback.format_exc()}')
                 
                 self.heartbeat_time = time.time()
         else:
@@ -852,14 +883,21 @@ class BluetoothChargeServer(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = BluetoothChargeServer('bluetooth_charge_server')
-    executor = MultiThreadedExecutor()
-    executor.add_node(node)
+    executor = None
     try:
+        executor = MultiThreadedExecutor()
+        executor.add_node(node)
         executor.spin()
+    except Exception:
+        node.get_logger().error(
+            f'bluetooth_charge_server main exception:\n{traceback.format_exc()}')
     finally:
-        executor.shutdown()
+        if executor is not None:
+            executor.shutdown()
         node.destroy_node()
-        rclpy.shutdown()
+        # SIGINT 时 rclpy 已触发 shutdown, 这里用 rclpy.ok() 避免重复关闭抛 RCLError
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
