@@ -294,7 +294,7 @@ class BluetoothChargeServer(Node):
                 return response
             elif time.time() - t1 > 10:
                 self.get_logger().info(f"Wait for {cmd} timeout")
-                response.success = False; response.code = 13; response.message = 'timeout response'
+                response.success = False; response.code = 32; response.message = 'timeout response'
                 return response
             else: time.sleep(1)
 

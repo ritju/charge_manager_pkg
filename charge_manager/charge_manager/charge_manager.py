@@ -53,7 +53,7 @@ CHARGE_ERROR_MESSAGES = {
 }
 
 # /charger/start_docking2 等待底层 /charge action 结果的兜底超时
-DOCKING2_RESULT_TIMEOUT = 480.0
+DOCKING2_RESULT_TIMEOUT = 600.0
 # mac 格式: XX:XX:XX:XX:XX:XX
 MAC_PATTERN = re.compile(r'([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
 # marker 格式: 对应 apriltag_ros 的 marker_id_and_bluetooth_mac_vec 配置项 "<id>[:<id_correction>]/<mac>",
@@ -190,6 +190,9 @@ class chargeManager(Node):
         # 本次 session 收到的首个错误信息
         self.charge_error = None
         self.charge_error_event = threading.Event()
+        # start_docking2 提前成功标准: 连续两次 feedback 为 charging(不等整个 action 结束)
+        self.charge_charging_consecutive = 0
+        self.charge_charging_event = threading.Event()
 
         # restore charge
         self.get_logger().info('restore charging or not ...')
@@ -491,6 +494,9 @@ class chargeManager(Node):
             self.charge_session = self._new_charge_session()
             self.charge_error = None
             self.charge_error_event.clear()
+            # 重置"连续两次 charging"判断
+            self.charge_charging_consecutive = 0
+            self.charge_charging_event.clear()
             self.get_logger().info(f'/charger/start_docking2: session={self.charge_session}')
             self.charger_state.is_docking = True
             charge_msg = Charge.Goal()
@@ -529,6 +535,8 @@ class chargeManager(Node):
             while time.monotonic() < end:
                 if self.charge_error_event.wait(0.1):
                     break
+                if self.charge_charging_event.is_set():
+                    break
                 if charge_get_future_result.done():
                     break
 
@@ -541,6 +549,16 @@ class chargeManager(Node):
                 # 底层流程仍在执行, is_docking 保持 True, 由上层下发 /charger/stop_docking 结束本次回充
                 response.code = code
                 response.message = message
+                return response
+
+            if self.charge_charging_event.is_set():
+                # 已连续两次收到 charging feedback: 判定回充成功并提前返回, 不等整个 action 结束
+                self.charge_session = ''
+                self.charger_state.is_docking = False
+                response.code = ChargeErrorCode.SUCCESS
+                response.message = 'success'
+                self.get_logger().info(
+                    '/charger/start_docking2: charge action entered charging state twice consecutively, return success')
                 return response
 
             if not charge_get_future_result.done():
@@ -593,7 +611,16 @@ class chargeManager(Node):
 
     def charge_action_feedback_callback(self, feedback_msg):
         try:
-            self.get_logger().info(f"=== charge action Feedback ===     {feedback_msg.feedback.state}", throttle_duration_sec=10)
+            state = feedback_msg.feedback.state
+            self.get_logger().info(f"=== charge action Feedback ===     {state}", throttle_duration_sec=10)
+            # start_docking2 提前成功标准: 连续两次 feedback 为 'charging'
+            # (对应 charge_action 的 ChargeActionState.charging), 非 charging 则计数清零
+            if state == 'charging':
+                self.charge_charging_consecutive += 1
+                if self.charge_charging_consecutive >= 2:
+                    self.charge_charging_event.set()
+            else:
+                self.charge_charging_consecutive = 0
         except Exception:
             self.get_logger().error(f'charge_action_feedback_callback exception:\n{traceback.format_exc()}')
 
