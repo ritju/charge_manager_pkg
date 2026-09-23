@@ -341,6 +341,8 @@ class chargeManager(Node):
             request.delta.orientation.x, request.delta.orientation.y,
             request.delta.orientation.z, request.delta.orientation.w,
         )
+        if abs(request.delta.position.x) > 0.1 or abs(request.delta.position.y) > 0.1:
+            return 'delta'
         if any(math.isnan(v) or math.isinf(v) for v in delta_values):
             return 'delta'
         return ''
