@@ -448,6 +448,9 @@ class ChargeAction(Node):
                     self.get_logger().info(f'hci devices: {hci_devices}')
                 else:
                     self.get_logger().info(f'No hci device detected.')
+                    self.publish_charge_error(
+                        ChargeErrorCode.BLUETOOTH_NOT_FOUND,
+                        f'bluetooth not found: no hci device in {self.bluetooth_connect_num} attempts')
                     if (not self.power_off_on_executing and 
                         self.charge_action_allow_power_off_on and 
                         self.power_off_on_client_.wait_for_service(2) and
@@ -496,12 +499,12 @@ class ChargeAction(Node):
             else:
                 pass
 
-        if (self.connect_bluetooth_executing):
+        if self.connect_bluetooth_executing:
             self.feedback_msg.state = ChargeActionState.connectbluetooth
             if self.bluetooth_connect_num >= self.bluetooth_connect_fail_num_max:
                 self.publish_charge_error(
-                    ChargeErrorCode.BLUETOOTH_NOT_FOUND,
-                    f'bluetooth not found: no hci device in {self.bluetooth_connect_num} attempts')
+                    ChargeErrorCode.BLUETOOTH_CONNECT_ERROR,
+                    f'bluetooth not found: connect failed in {self.bluetooth_connect_num} attempts')
         elif self.dock_executing:
             self.feedback_msg.state = ChargeActionState.docking
         elif self.charger_state.is_charging:
