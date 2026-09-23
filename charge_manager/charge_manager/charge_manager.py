@@ -555,7 +555,7 @@ class chargeManager(Node):
 
             if self.charge_charging_event.is_set():
                 # 已连续两次收到 charging feedback: 判定回充成功并提前返回, 不等整个 action 结束, 不重置session, 该情况下不重置session
-                # self.charge_session = ''
+                self.charge_session = ''
                 self.charger_state.is_docking = False
                 response.code = ChargeErrorCode.SUCCESS
                 response.message = 'success'
