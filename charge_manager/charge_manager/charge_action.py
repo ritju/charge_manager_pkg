@@ -300,7 +300,7 @@ class ChargeAction(Node):
         self.stop_loop = False
 
         self.bluetooth_connect_num = 0
-        self.bluetooth_connect_num_max = 99999
+        self.bluetooth_connect_num_max = 5
 
         # add process when dock goal is rejected
         self.dock_goal_rejected = False
@@ -439,8 +439,8 @@ class ChargeAction(Node):
             self.future_start_apriltag = self.start_apriltag_client_.call_async(request)
             self.future_start_apriltag.add_done_callback(self.start_apriltag_detect_future_done_callback)
         
-        if self.bluetooth_setup:
-            if not self.bluetooth_connected and  not self.connect_bluetooth_executing and not self.stop_loop: # do not connect bluetooth when rebooting bluetooth server
+        if self.bluetooth_setup and not self.stop_loop:
+            if not self.bluetooth_connected and not self.connect_bluetooth_executing: # do not connect bluetooth when rebooting bluetooth server
                 self.connect_bluetooth_executing = True
                 
                 hci_devices = ChargeAction.get_hci_devices_pattern()
@@ -448,12 +448,6 @@ class ChargeAction(Node):
                     self.get_logger().info(f'hci devices: {hci_devices}')
                 else:
                     self.get_logger().info(f'No hci device detected.')
-                    if self.bluetooth_connect_num >= self.bluetooth_connect_fail_num_max:
-                        # 连续多轮都没有 hci 设备, 判定不可恢复: 仅上报错误码,
-                        # 停止本次回充由上层调用 stop(取消 goal)触发
-                        self.publish_charge_error(
-                            ChargeErrorCode.BLUETOOTH_NOT_FOUND,
-                            f'bluetooth not found: no hci device in {self.bluetooth_connect_num} attempts')
                     if (not self.power_off_on_executing and 
                         self.charge_action_allow_power_off_on and 
                         self.power_off_on_client_.wait_for_service(2) and
@@ -504,6 +498,10 @@ class ChargeAction(Node):
 
         if (self.connect_bluetooth_executing):
             self.feedback_msg.state = ChargeActionState.connectbluetooth
+            if self.bluetooth_connect_num >= self.bluetooth_connect_fail_num_max:
+                self.publish_charge_error(
+                    ChargeErrorCode.BLUETOOTH_NOT_FOUND,
+                    f'bluetooth not found: no hci device in {self.bluetooth_connect_num} attempts')
         elif self.dock_executing:
             self.feedback_msg.state = ChargeActionState.docking
         elif self.charger_state.is_charging:
