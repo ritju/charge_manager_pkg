@@ -429,8 +429,13 @@ class ChargeAction(Node):
                 self.switch_resolution_executing = True
                 request = SwitchResolution.Request()
                 request.resolution_mode = SwitchResolution.Request.RESOLUTION_HIGH
-                self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
-                self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
+                if self.switch_resolution_client_.wait_for_service(2.0):
+                    self.future_switch_resolution = self.switch_resolution_client_.call_async(request)
+                    self.future_switch_resolution.add_done_callback(self.switch_resolution_future_done_callback)
+                else:
+                    self.publish_charge_error(
+                        ChargeErrorCode.INTERFACE_FAILED,
+                        'service /rgb_camera_manager_server/switch_resolution not ready!')
         
         if not self.apriltag_detecting and not self.stop_loop and not self.start_apriltag_detecting_executing:
             self.get_logger().info('-------- call /start_detect_apriltag service --------')
