@@ -788,7 +788,7 @@ class BluetoothChargeServer(Node):
                     self.udp_data = None
                     self.heartbeat_time = current_time + 0.01
 
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
 
         except Exception as e:
             self.get_logger().info(f'BLE 连接/通信异常: {str(e)}')
